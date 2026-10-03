@@ -11,13 +11,18 @@ const jwt = require('jsonwebtoken');
 const multer = require('multer');
 
 const app = express();
-const PORT = 3000;
-const SECRET_KEY = 'vin-inspector-secret-key'; // In prod, use .env
+const PORT = process.env.PORT || 3000;
+const SECRET_KEY = process.env.JWT_SECRET || process.env.SECRET_KEY || 'vin-inspector-secret-key';
 
 // Middleware
 app.use(cors());
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+// Health check endpoint
+app.get('/', (req, res) => {
+    res.json({ status: 'ok', message: 'VIN Inspector API is running' });
+});
 
 // Ensure upload directory exists
 const uploadDir = path.join(__dirname, 'uploads');
