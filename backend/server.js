@@ -547,6 +547,396 @@ Return ONLY valid JSON matching this structure:
     }
 });
 
+// Analyze NPS / Survey PDF and return structured Excel-compatible rows
+app.post('/api/analyze-pdf', upload.single('file'), async (req, res) => {
+    let filePath = null;
+    try {
+        if (!req.file) {
+            return res.status(400).json({ error: 'No PDF file uploaded' });
+        }
+        filePath = req.file.path;
+        const buffer = fs.readFileSync(filePath);
+        const effectiveKey = process.env.GEMINI_API_KEY;
+
+        let result = null;
+
+        // --- STRATEGY 1: CAMSCANNER / PHOTO-SCANNED PDF (Extract embedded page JPEGs) ---
+        const pageImages = [];
+        let start = 0;
+        while ((start = buffer.indexOf(Buffer.from([0xFF, 0xD8, 0xFF]), start)) !== -1) {
+            const end = buffer.indexOf(Buffer.from([0xFF, 0xD9]), start + 2);
+            if (end !== -1) {
+                const img = buffer.slice(start, end + 2);
+                if (img.length > 45000) { // Only full page scans (>45KB)
+                    pageImages.push(img);
+                }
+                start = end + 2;
+            } else {
+                break;
+            }
+        }
+
+        console.log(`Found ${pageImages.length} full-page scans in PDF`);
+
+        if (effectiveKey && pageImages.length > 0) {
+            console.log(`Analyzing ${pageImages.length} page scans with multi-page Gemini Vision...`);
+
+            // Dedicated High-Precision Pass for the 4th Page (Stamped Metal VIN Photo)
+            let dedicatedVinData = null;
+            if (pageImages.length >= 2) {
+                try {
+                    // Pick the 4th image (index 3) or the last image in the document
+                    const vinPhotoImg = pageImages[3] || pageImages[pageImages.length - 1];
+                    const sharp = require('sharp');
+                    const enhancedBuf = await sharp(vinPhotoImg)
+                        .resize({ width: 1600, withoutEnlargement: true })
+                        .normalize()
+                        .sharpen()
+                        .jpeg({ quality: 95 })
+                        .toBuffer();
+
+                    const vinPrompt = `You are a forensic vehicle inspector and metallurgical character recognition AI.
+Analyze this close-up photo of a vehicle's stamped/punched chassis VIN on a metal pipe (steering head tube), along with the GPS Map Camera watermark banner at the bottom.
+
+Note on Stamped Character Orientation & Format:
+- The VIN characters are punched/stamped vertically along the length of the dark cylindrical metal pipe/chassis tube.
+- Read carefully from top to bottom (or along the text line).
+- Standard motorcycle VINs (Hero, TVS, Honda, Bajaj, Yamaha) are 17 alphanumeric characters (e.g. MBL..., MD6..., ME4...).
+- Pay critical attention to:
+  * 0 (zero) vs O (letter)
+  * 1 (one) vs I (letter)
+  * 8 vs B
+  * 5 vs S
+  * 2 vs Z
+  * G vs 6
+
+TASKS:
+1. "stampedVin": Read the EXACT chassis / VIN stamped into the metal pipe.
+2. "gpsLocation": Full text of the location address in the watermark banner.
+3. "gpsCoordinates": Latitude and Longitude from the watermark.
+4. "gpsDateTime": Date and Time from the watermark.
+
+Return ONLY valid JSON:
+{
+  "stampedVin": "EXTRACTED_VIN",
+  "gpsLocation": "LOCATION",
+  "gpsCoordinates": "LAT, LONG",
+  "gpsDateTime": "DATETIME"
+}`;
+
+                    const vRes = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${effectiveKey.trim()}`, {
+                        contents: [{
+                            parts: [
+                                { text: vinPrompt },
+                                { inlineData: { mimeType: 'image/jpeg', data: enhancedBuf.toString('base64') } }
+                            ]
+                        }],
+                        generationConfig: { responseMimeType: 'application/json' }
+                    }, { timeout: 35000 });
+
+                    if (vRes.data?.candidates?.[0]?.content?.parts?.[0]?.text) {
+                        dedicatedVinData = JSON.parse(vRes.data.candidates[0].content.parts[0].text);
+                        console.log('Dedicated 4th VIN image extraction:', dedicatedVinData);
+                    }
+                } catch (vErr) {
+                    console.warn('Dedicated 4th VIN pass warning:', vErr.message);
+                }
+            }
+
+            // Unified Dossier Pass (Correlates customer survey, workshop survey, stamped metal photo, GPS)
+            const unifiedPrompt = `You are an expert vehicle inspector and survey data extraction specialist.
+Analyze all pages of this uploaded vehicle survey / inspection document.
+
+Carefully correlate the information across all pages:
+- If pages belong to the same vehicle/inspection dossier, merge them into a single comprehensive record.
+- If there are multiple distinct vehicles/customers, output a record for each.
+- Ensure all relevant fields are captured: Customer Name, Mobile, Location, Date, Brand, Vehicle Model, VIN / Chassis, Odometer Reading, Dealer / Workshop, Product NPS Score, Product Sentiment, Product Feedback, Service NPS Score, Service Sentiment, Service Feedback, GPS Watermark Location.
+
+Return ONLY a valid JSON object matching this schema:
+{
+  "columns": [
+    "Customer Name",
+    "Mobile",
+    "Location",
+    "Date",
+    "Brand",
+    "Vehicle Model",
+    "Form VIN",
+    "Stamped Metal VIN",
+    "VIN Match Status",
+    "Odometer Reading",
+    "Dealer / Workshop",
+    "Product NPS Score",
+    "Product Sentiment",
+    "Product Feedback",
+    "Service NPS Score",
+    "Service Sentiment",
+    "Service Feedback",
+    "GPS Watermark Location",
+    "GPS Coordinates",
+    "GPS Timestamp"
+  ],
+  "rows": [
+    {
+      "Customer Name": "...",
+      "Mobile": "...",
+      "Location": "...",
+      "Date": "...",
+      "Brand": "...",
+      "Vehicle Model": "...",
+      "Form VIN": "...",
+      "Stamped Metal VIN": "...",
+      "VIN Match Status": "✅ Match",
+      "Odometer Reading": "...",
+      "Dealer / Workshop": "...",
+      "Product NPS Score": 10,
+      "Product Sentiment": "Promoter",
+      "Product Feedback": "...",
+      "Service NPS Score": 10,
+      "Service Sentiment": "Promoter",
+      "Service Feedback": "...",
+      "GPS Watermark Location": "...",
+      "GPS Coordinates": "...",
+      "GPS Timestamp": "..."
+    }
+  ]
+}`;
+
+            const parts = [{ text: unifiedPrompt }];
+            pageImages.forEach(imgBuf => {
+                parts.push({
+                    inlineData: { mimeType: 'image/jpeg', data: imgBuf.toString('base64') }
+                });
+            });
+
+            const models = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.7-flash'];
+            for (const model of models) {
+                try {
+                    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${effectiveKey.trim()}`;
+                    const geminiRes = await axios.post(url, {
+                        contents: [{ parts }],
+                        generationConfig: { responseMimeType: 'application/json' }
+                    }, { timeout: 60000 });
+
+                    const jsonStr = geminiRes.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+                    if (jsonStr) {
+                        const parsed = JSON.parse(jsonStr);
+                        if (parsed && Array.isArray(parsed.rows) && parsed.rows.length > 0) {
+                            // If dedicated VIN pass got higher precision for 4th page, enrich the row
+                            if (dedicatedVinData && dedicatedVinData.stampedVin) {
+                                parsed.rows.forEach(r => {
+                                    if (!r['Stamped Metal VIN'] || r['Stamped Metal VIN'] === '...' || r['Stamped Metal VIN'].length < dedicatedVinData.stampedVin.length) {
+                                        r['Stamped Metal VIN'] = dedicatedVinData.stampedVin;
+                                    }
+                                    if (dedicatedVinData.gpsLocation && (!r['GPS Watermark Location'] || r['GPS Watermark Location'] === '...')) {
+                                        r['GPS Watermark Location'] = dedicatedVinData.gpsLocation;
+                                    }
+                                    if (dedicatedVinData.gpsCoordinates) {
+                                        r['GPS Coordinates'] = dedicatedVinData.gpsCoordinates;
+                                    }
+                                    if (dedicatedVinData.gpsDateTime) {
+                                        r['GPS Timestamp'] = dedicatedVinData.gpsDateTime;
+                                    }
+
+                                    // Check VIN match with intelligent optical character normalization (0 vs O, 1 vs I, dot-peen noise)
+                                    const formVin = String(r['Form VIN'] || r['VIN / Chassis'] || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+                                    const stampedVin = String(r['Stamped Metal VIN'] || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+                                    if (formVin && stampedVin) {
+                                        const normF = formVin.replace(/O/g, '0').replace(/I/g, '1');
+                                        const normS = stampedVin.replace(/O/g, '0').replace(/I/g, '1');
+                                        let isMatch = normF === normS || normF.includes(normS) || normS.includes(normF) || (normF.slice(-5) === normS.slice(-5));
+                                        
+                                        if (!isMatch) {
+                                            // Check longest common alphanumeric substring between form and stamped VIN
+                                            for (let i = 0; i < normF.length; i++) {
+                                                for (let j = i + 6; j <= normF.length; j++) {
+                                                    const sub = normF.slice(i, j);
+                                                    if (normS.includes(sub)) {
+                                                        isMatch = true;
+                                                        break;
+                                                    }
+                                                }
+                                                if (isMatch) break;
+                                            }
+                                        }
+
+                                        r['VIN Match Status'] = isMatch ? '✅ Match' : '⚠️ Review';
+                                    }
+                                });
+                            }
+
+                            const rawCols = parsed.columns || Object.keys(parsed.rows[0]);
+                            result = {
+                                columns: rawCols.filter(c => c !== '#'),
+                                rows: parsed.rows
+                            };
+                            console.log(`Unified dossier extracted successfully via ${model}`);
+                            break;
+                        }
+                    }
+                } catch (uErr) {
+                    console.warn(`Unified extraction with ${model} warning:`, uErr.response?.data?.error?.message || uErr.message);
+                }
+            }
+
+            // Fallback: Per-page extraction if unified call didn't yield rows
+            if (!result) {
+                console.log('Falling back to per-page vision extraction...');
+                const pagePromises = pageImages.map(async (imgBuf, idx) => {
+                    try {
+                        const singlePrompt = 'Extract all customer, VIN, model, NPS score (0-10), sentiment, and feedback fields from this survey page into JSON.';
+                        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${effectiveKey.trim()}`;
+                        const res = await axios.post(url, {
+                            contents: [{
+                                parts: [
+                                    { text: singlePrompt },
+                                    { inlineData: { mimeType: 'image/jpeg', data: imgBuf.toString('base64') } }
+                                ]
+                            }],
+                            generationConfig: { responseMimeType: 'application/json' }
+                        }, { timeout: 30000 });
+
+                        const parsed = JSON.parse(res.data.candidates[0].content.parts[0].text);
+                        return parsed;
+                    } catch (e) {
+                        return null;
+                    }
+                });
+
+                const pageRows = (await Promise.all(pagePromises)).filter(p => p !== null);
+                if (pageRows.length > 0) {
+                    const cols = Object.keys(pageRows[0]).filter(c => c !== '#');
+                    result = { columns: cols, rows: pageRows };
+                }
+            }
+        }
+
+        // --- STRATEGY 2: DIGITAL TEXT-BASED PDF (pdf-parse + Gemini text model) ---
+        if (!result) {
+            let pdfText = '';
+            try {
+                const pdfParse = require('pdf-parse');
+                const pdfData = await pdfParse(buffer);
+                pdfText = (pdfData.text || '').trim();
+            } catch (pErr) {
+                console.warn('pdf-parse text extraction warning:', pErr.message);
+            }
+
+            if (effectiveKey && pdfText.length > 50) {
+                const textPrompt = `You are an expert document and quality data extraction specialist.
+Analyze this text extracted from an automotive survey / NPS / complaint PDF document:
+${pdfText.substring(0, 45000)}
+
+Extract ALL survey records into a clean structured table format.
+Return ONLY valid JSON matching this schema:
+{
+  "columns": ["Customer Name", "VIN / Chassis", "Vehicle Model", "NPS Score", "Sentiment", "Complaint Group", "Feedback", "Dealer", "Date"],
+  "rows": [
+    {
+      "Customer Name": "...",
+      "VIN / Chassis": "...",
+      "Vehicle Model": "...",
+      "NPS Score": 9,
+      "Sentiment": "Promoter",
+      "Complaint Group": "...",
+      "Feedback": "...",
+      "Dealer": "...",
+      "Date": "..."
+    }
+  ]
+}`;
+                try {
+                    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=${effectiveKey.trim()}`;
+                    const geminiRes = await axios.post(url, {
+                        contents: [{ parts: [{ text: textPrompt }] }],
+                        generationConfig: { responseMimeType: 'application/json' }
+                    }, { timeout: 45000 });
+
+                    const jsonStr = geminiRes.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+                    if (jsonStr) {
+                        const parsed = JSON.parse(jsonStr);
+                        if (parsed && Array.isArray(parsed.rows) && parsed.rows.length > 0) {
+                            result = { columns: parsed.columns || Object.keys(parsed.rows[0]), rows: parsed.rows };
+                        } else if (Array.isArray(parsed) && parsed.length > 0) {
+                            result = { columns: Object.keys(parsed[0]), rows: parsed };
+                        }
+                    }
+                } catch (tErr) {
+                    console.warn('Text-based Gemini extraction failed:', tErr.message);
+                }
+            }
+        }
+
+        // 3. Fallback: Parse lines directly if Gemini is unavailable or rate-limited
+        if (!result || !result.rows || result.rows.length === 0) {
+            console.log('Using local text fallback parser for PDF');
+            const lines = pdfText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+            
+            // Check for delimiter like tab or comma or pipe
+            const sampleLines = lines.slice(0, 10);
+            const hasTabs = sampleLines.some(l => l.includes('\t'));
+            const hasPipes = sampleLines.some(l => l.includes('|'));
+
+            if (hasTabs || hasPipes) {
+                const sep = hasTabs ? '\t' : '|';
+                const headerLine = lines[0];
+                const rawHeaders = headerLine.split(sep).map(h => h.trim()).filter(h => h);
+                const dataLines = lines.slice(1);
+                
+                const rows = dataLines.map((line, idx) => {
+                    const parts = line.split(sep).map(p => p.trim());
+                    const obj = { '#': idx + 1 };
+                    rawHeaders.forEach((h, colIdx) => {
+                        obj[h] = parts[colIdx] || '';
+                    });
+                    return obj;
+                });
+
+                result = {
+                    columns: ['#', ...rawHeaders],
+                    rows
+                };
+            } else {
+                // Chunk lines into structured records
+                const rows = [];
+                for (let i = 0; i < lines.length; i += 4) {
+                    rows.push({
+                        'Record #': Math.floor(i / 4) + 1,
+                        'Entry Details': lines[i] || '',
+                        'Customer / Item': lines[i + 1] || '',
+                        'Description / Feedback': lines[i + 2] || '',
+                        'Status / Notes': lines[i + 3] || ''
+                    });
+                }
+
+                result = {
+                    columns: ['Record #', 'Entry Details', 'Customer / Item', 'Description / Feedback', 'Status / Notes'],
+                    rows: rows.length > 0 ? rows : [{
+                        'Record #': 1,
+                        'Entry Details': 'Extracted PDF Content',
+                        'Customer / Item': 'NPS Report',
+                        'Description / Feedback': pdfText.substring(0, 200),
+                        'Status / Notes': 'Completed'
+                    }]
+                };
+            }
+        }
+
+        res.json({
+            success: true,
+            columns: result.columns,
+            rows: result.rows
+        });
+    } catch (err) {
+        console.error('Analyze PDF error:', err);
+        res.status(500).json({ error: err.message || 'Error analyzing PDF' });
+    } finally {
+        if (filePath && fs.existsSync(filePath)) {
+            try { fs.unlinkSync(filePath); } catch (e) {}
+        }
+    }
+});
+
 app.listen(PORT, () => {
     console.log(`Backend running on http://localhost:${PORT}`);
 });

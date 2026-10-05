@@ -1,8 +1,33 @@
 import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
+import { 
+    ScanLine, 
+    ShieldCheck, 
+    ClipboardList, 
+    BarChart3, 
+    Download, 
+    UploadCloud, 
+    Play, 
+    Pause, 
+    FileSpreadsheet, 
+    CheckCircle2, 
+    XCircle, 
+    AlertTriangle, 
+    Clock, 
+    MapPin, 
+    Search, 
+    SlidersHorizontal, 
+    LogOut,
+    Sparkles,
+    Check,
+    Layers,
+    FileText,
+    RotateCcw
+} from 'lucide-react';
 import { API_URL } from './api';
 import './Dashboard.css';
+import NpsAnalyzer from './NpsAnalyzer';
 
 interface GeoLocationData {
     latitude?: string;
@@ -68,6 +93,193 @@ const AdminDashboard: React.FC = () => {
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "Parsed Matrix");
         XLSX.writeFile(wb, "Validator_Export.xlsx");
+    };
+
+    // Download Sample Excel Template for VIN Inspector
+    const handleDownloadVinTemplate = () => {
+        const templateData = [
+            {
+                "Expected VIN": "MBLJAU021TG805557",
+                "Google Drive Image Link": "https://drive.google.com/file/d/1ExampleDriveFileIdHeroXtreme/view?usp=sharing",
+                "Vehicle Model": "Hero Xtreme 160R",
+                "Customer Name": "Ramesh Kumar"
+            },
+            {
+                "Expected VIN": "MD625AF91TIAF7903",
+                "Google Drive Image Link": "https://drive.google.com/file/d/1ExampleDriveFileIdTVSRaider/view?usp=sharing",
+                "Vehicle Model": "TVS Raider 125",
+                "Customer Name": "Sanelpana Perera"
+            },
+            {
+                "Expected VIN": "ME4JC483KKT012345",
+                "Google Drive Image Link": "https://drive.google.com/file/d/1ExampleDriveFileIdHondaActiva/view?usp=sharing",
+                "Vehicle Model": "Honda Activa 6G",
+                "Customer Name": "Sunil Silva"
+            }
+        ];
+        const ws = XLSX.utils.json_to_sheet(templateData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "VIN_Validation");
+        XLSX.writeFile(wb, "VIN_Inspector_Template.xlsx");
+    };
+
+    // Load rich sample dataset for instant interactive test in VIN Inspector
+    const handleLoadSampleVinData = () => {
+        setFileName("Sample_Automotive_Inspection_Batch.xlsx");
+        setOriginalColumns(["Expected VIN", "Google Drive Image Link", "Vehicle Model", "Customer Name"]);
+        const sampleRows: ProcessedRow[] = [
+            {
+                "Expected VIN": "MBLJAU021TG805557",
+                "Google Drive Image Link": "https://drive.google.com/file/d/1ExampleDriveFileIdHeroXtreme/view?usp=sharing",
+                "Vehicle Model": "Hero Xtreme 160R",
+                "Customer Name": "Ramesh Kumar",
+                extractedVin: "MBLJAU021TG805557",
+                geoLocation: {
+                    latitude: "6.939443",
+                    longitude: "79.851817",
+                    location: "Sameera's Lane, Colombo, Western Province, Sri Lanka",
+                    dateTime: "01/10/2026 10:28 AM"
+                },
+                isMatch: "Match",
+                status: "Complete"
+            },
+            {
+                "Expected VIN": "MD625AF91TIAF7903",
+                "Google Drive Image Link": "https://drive.google.com/file/d/1ExampleDriveFileIdTVSRaider/view?usp=sharing",
+                "Vehicle Model": "TVS Raider 125",
+                "Customer Name": "Sanelpana Perera",
+                extractedVin: "MD625AF91TIAF7903",
+                geoLocation: {
+                    latitude: "6.939356",
+                    longitude: "79.852095",
+                    location: "Colombo, Western Province, Sri Lanka",
+                    dateTime: "01/10/2026 10:27 AM"
+                },
+                isMatch: "Match",
+                status: "Complete"
+            },
+            {
+                "Expected VIN": "ME4JC483KKT012345",
+                "Google Drive Image Link": "https://drive.google.com/file/d/1ExampleDriveFileIdHondaActiva/view?usp=sharing",
+                "Vehicle Model": "Honda Activa 6G",
+                "Customer Name": "Sunil Silva",
+                extractedVin: "ME4JC483KKT012399",
+                geoLocation: {
+                    latitude: "6.927079",
+                    longitude: "79.861244",
+                    location: "Kollupitiya, Colombo, Sri Lanka",
+                    dateTime: "01/10/2026 11:15 AM"
+                },
+                isMatch: "Mismatch",
+                status: "Complete"
+            },
+            {
+                "Expected VIN": "MAT623048N3J91823",
+                "Google Drive Image Link": "https://drive.google.com/file/d/1ExampleDriveFileIdNexon/view?usp=sharing",
+                "Vehicle Model": "Tata Nexon EV",
+                "Customer Name": "Ananya Iyer",
+                extractedVin: "MAT623048N3J91823",
+                geoLocation: {
+                    latitude: "12.9716",
+                    longitude: "77.5946",
+                    location: "Prerana Motors Bangalore, Karnataka",
+                    dateTime: "02/10/2026 09:40 AM"
+                },
+                isMatch: "Match",
+                status: "Complete"
+            },
+            {
+                "Expected VIN": "MA3FBA12S00192834",
+                "Google Drive Image Link": "https://drive.google.com/file/d/1ExampleDriveFileIdHarrier/view?usp=sharing",
+                "Vehicle Model": "Tata Harrier XZ+",
+                "Customer Name": "Rajesh Sharma",
+                extractedVin: "MA3FBA12S00192834",
+                geoLocation: {
+                    latitude: "18.5204",
+                    longitude: "73.8567",
+                    location: "Autovista Pune, Maharashtra",
+                    dateTime: "02/10/2026 14:15 PM"
+                },
+                isMatch: "Match",
+                status: "Complete"
+            }
+        ];
+        setExcelData(sampleRows);
+        setProgress(100);
+    };
+
+    // Download Sample Excel Template for Validator Matrix
+    const handleDownloadValidatorTemplate = () => {
+        const templateData = [
+            {
+                "Record #": 1,
+                "VIN": "MD625AF91T1AF7903",
+                "Vehicle Model": "TVS Raider",
+                "Plant Code": "Hosur (Plant 1)",
+                "Dealer Code": "DLR-2041",
+                "Status": "Active",
+                "Remarks": "Chassis Inspection Passed"
+            },
+            {
+                "Record #": 2,
+                "VIN": "MBLJAU021TG805557",
+                "Vehicle Model": "Hero Xtreme",
+                "Plant Code": "Dharuhera",
+                "Dealer Code": "DLR-1088",
+                "Status": "Active",
+                "Remarks": "Assembly Verified"
+            },
+            {
+                "Record #": 3,
+                "VIN": "ME4JC483KKT012345",
+                "Vehicle Model": "Honda Activa",
+                "Plant Code": "Narsapura",
+                "Dealer Code": "DLR-3052",
+                "Status": "Active",
+                "Remarks": "Pre-delivery Inspection Complete"
+            }
+        ];
+        const ws = XLSX.utils.json_to_sheet(templateData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Validation_Matrix");
+        XLSX.writeFile(wb, "Validation_Matrix_Template.xlsx");
+    };
+
+    // Download Sample Excel Template for Questionnaire Validation
+    const handleDownloadQuestTemplate = () => {
+        const templateData = [
+            {
+                "Complaint group (L2)": "Brake System",
+                "Sub Complaint (L3)": "Front brake noise",
+                "Brake": "Moring time only",
+                "Engine": "Normal",
+                "Electrical": "OK",
+                "Transmission": "Smooth",
+                "Suspension": "Standard"
+            },
+            {
+                "Complaint group (L2)": "Electrical System",
+                "Sub Complaint (L3)": "Headlight flickering",
+                "Brake": "OK",
+                "Engine": "Normal",
+                "Electrical": "Intermittent loose wiring",
+                "Transmission": "Smooth",
+                "Suspension": "Standard"
+            },
+            {
+                "Complaint group (L2)": "Engine / Powertrain",
+                "Sub Complaint (L3)": "Cold start hesitation",
+                "Brake": "OK",
+                "Engine": "Choke valve sticking",
+                "Electrical": "OK",
+                "Transmission": "Smooth",
+                "Suspension": "Standard"
+            }
+        ];
+        const ws = XLSX.utils.json_to_sheet(templateData);
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Questionnaire_Hierarchy");
+        XLSX.writeFile(wb, "Questionnaire_TGW_Template.xlsx");
     };
     
     /*
@@ -541,127 +753,166 @@ const AdminDashboard: React.FC = () => {
     const mismatchCount = excelData.filter(r => r.isMatch === 'Mismatch').length;
 
     return (
-        <div style={{ background: 'var(--color-bg)', minHeight: '100vh', fontFamily: "var(--font-body)" }}>
+        <div className="dashboard-layout">
             
-            {/* Header */}
-            <header style={{ 
-                background: 'var(--color-surface)', 
-                padding: '14px 32px', 
-                borderBottom: '1px solid var(--color-border)',
-                color: 'var(--color-text)', 
-                display: 'flex', 
-                justifyContent: 'space-between', 
-                alignItems: 'center'
-            }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-                    <img src="/assets/focus_logo.png" alt="Focus Engineering" style={{ height: "42px", width: "auto", objectFit: "contain" }} />
-                    <div>
-                        <h2 style={{ margin: 0, fontSize: "17px", fontWeight: 700, letterSpacing: "-0.02em", color: "var(--color-text)", fontFamily: "var(--font-display)" }}>Advanced Validation Platform</h2>
-                        <span style={{ fontSize: "11px", color: "var(--color-text-muted)", fontWeight: 500, letterSpacing: "0.02em" }}>Chassis &middot; Geo-Location &middot; Questionnaire</span>
+            {/* Glossy Modern Header */}
+            <header className="glossy-header">
+                <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+                    <div className="brand-badge">
+                        <ScanLine size={22} color="#ffffff" />
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <h2 style={{ margin: 0, fontSize: "17px", fontWeight: 800, letterSpacing: "-0.02em", color: "#0f172a" }}>
+                                AutoVIN Intelligence
+                            </h2>
+                            <span className="live-indicator">
+                                <span className="live-dot" />
+                                Engine v2.4 Active
+                            </span>
+                        </div>
+                        <span style={{ fontSize: "12px", color: "var(--color-text-muted)", fontWeight: 500 }}>
+                            Automotive Chassis Inspection &middot; Geofence Verification &middot; NPS Intelligence
+                        </span>
                     </div>
                 </div>
                 <button 
                     onClick={handleLogout} 
+                    className="modern-btn"
                     style={{ 
-                        background: 'var(--color-danger-bg)', 
-                        border: '1px solid rgba(239, 68, 68, 0.2)', 
-                        color: '#f87171', 
-                        padding: '8px 18px', 
-                        borderRadius: 'var(--radius-sm)', 
-                        cursor: 'pointer',
+                        background: '#fef2f2', 
+                        border: '1px solid rgba(254, 202, 202, 0.8)', 
+                        color: '#dc2626', 
+                        padding: '8px 16px', 
                         fontSize: '13px',
-                        fontWeight: 600,
-                        fontFamily: 'var(--font-body)',
-                        transition: 'all 0.2s'
+                        borderRadius: '10px',
+                        boxShadow: '0 1px 3px rgba(220, 38, 38, 0.08)'
                     }}
-                    onMouseOver={(e) => e.currentTarget.style.background = 'rgba(239, 68, 68, 0.15)'}
-                    onMouseOut={(e) => e.currentTarget.style.background = 'var(--color-danger-bg)'}
+                    onMouseOver={(e) => { e.currentTarget.style.background = '#fee2e2'; }}
+                    onMouseOut={(e) => { e.currentTarget.style.background = '#fef2f2'; }}
                 >
+                    <LogOut size={15} />
                     Logout
                 </button>
             </header>
 
-            {/* Navigation Tabs */}
-            <div style={{ background: 'var(--color-surface)', borderBottom: '1px solid var(--color-border)', padding: '0 32px', display: 'flex', gap: '4px' }}>
-                {['VIN Inspector', 'Validator', 'Questionnaire Validation'].map((tab) => (
-                    <button
-                        key={tab}
-                        onClick={() => setActiveTab(tab)}
-                        style={{
-                            padding: '14px 20px',
-                            background: activeTab === tab ? 'var(--color-primary-glow)' : 'transparent',
-                            border: 'none',
-                            borderBottom: activeTab === tab ? '2px solid var(--color-primary)' : '2px solid transparent',
-                            color: activeTab === tab ? 'var(--color-primary-hover)' : 'var(--color-text-muted)',
-                            fontSize: '13px',
-                            fontWeight: activeTab === tab ? 700 : 500,
-                            fontFamily: 'var(--font-body)',
-                            cursor: 'pointer',
-                            transition: 'all 0.2s',
-                            outline: 'none',
-                            borderRadius: 'var(--radius-sm) var(--radius-sm) 0 0',
-                            letterSpacing: '0.01em'
-                        }}
-                    >
-                        {tab}
-                    </button>
-                ))}
+            {/* Navigation Tabs - Modern Segmented Floating Pill Bar */}
+            <div className="glass-tabs-nav-bar">
+                <div className="glass-tabs-container">
+                    {[
+                        { name: 'VIN Inspector', icon: <ScanLine size={16} /> },
+                        { name: 'Validator', icon: <ShieldCheck size={16} /> },
+                        { name: 'Questionnaire Validation', icon: <ClipboardList size={16} /> },
+                        { name: 'NPS Analyzer', icon: <BarChart3 size={16} /> }
+                    ].map(({ name, icon }) => (
+                        <button
+                            key={name}
+                            onClick={() => setActiveTab(name)}
+                            className={`glass-tab-btn ${activeTab === name ? 'active' : ''}`}
+                        >
+                            {icon}
+                            {name}
+                        </button>
+                    ))}
+                </div>
             </div>
 
-            <main style={{ padding: '24px 32px', width: '100%', boxSizing: 'border-box', margin: '0' }}>
+            <main style={{ padding: '28px 36px', maxWidth: '1600px', margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
                 
                 {activeTab === 'VIN Inspector' && (
                     <>
-                        {/* Upload Card */}
-                <div style={{ 
-                    background: 'var(--color-surface)', 
-                    padding: '20px 24px', 
-                    borderRadius: '12px', 
-                    border: '1px solid var(--color-border)',
-                    boxShadow: 'var(--shadow-md)',
-                    marginBottom: '24px',
-                    width: 'fit-content',
-                    maxWidth: '100%'
-                }}>
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', flexWrap: 'wrap', gap: '24px' }}>
-                        <div>
-                            <h3 style={{ margin: '0 0 6px 0', fontSize: '16px', fontWeight: 700, color: 'var(--color-text)' }}>
-                                📁 Upload Validation Excel
-                            </h3>
-                            <p style={{ color: 'var(--color-text-muted)', fontSize: '13px', margin: 0 }}>
-                                Excel with Column 1 = Expected VIN, Column 2 = Google Drive Image Link
-                            </p>
+                        {/* Upload Dropzone Card */}
+                        <div className="glass-panel" style={{ padding: '24px 28px', marginBottom: '24px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '20px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                                    <div className="dropzone-icon-box">
+                                        <ScanLine size={24} />
+                                    </div>
+                                    <div>
+                                        <h3 style={{ margin: '0 0 4px 0', fontSize: '16px', fontWeight: 700, color: '#0f172a' }}>
+                                            Upload Validation Spreadsheet
+                                        </h3>
+                                        <p style={{ color: 'var(--color-text-muted)', fontSize: '13px', margin: 0 }}>
+                                            Columns required: <strong>Expected VIN</strong> &amp; <strong>Google Drive Image Link</strong>
+                                        </p>
+                                    </div>
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                                    <label className="modern-btn modern-btn-primary" style={{ cursor: 'pointer', margin: 0 }}>
+                                        <UploadCloud size={16} />
+                                        Browse File
+                                        <input
+                                            type="file"
+                                            accept=".xlsx, .xls, .csv"
+                                            onChange={handleFileUpload}
+                                            onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
+                                            style={{ display: 'none' }}
+                                        />
+                                    </label>
+                                    <button
+                                        onClick={handleDownloadVinTemplate}
+                                        className="modern-btn modern-btn-outline"
+                                        title="Download sample Excel template with Expected VIN and Google Drive Image columns"
+                                    >
+                                        <Download size={15} />
+                                        Download Template
+                                    </button>
+                                    <button
+                                        onClick={handleLoadSampleVinData}
+                                        className="modern-btn modern-btn-secondary"
+                                        title="Load sample inspection records to test immediately"
+                                    >
+                                        <Sparkles size={15} color="#8b5cf6" />
+                                        Load Sample Data
+                                    </button>
+                                </div>
+                            </div>
                         </div>
-                        <input
-                            type="file"
-                            accept=".xlsx, .xls, .csv"
-                            onChange={handleFileUpload}
-                            onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
-                            style={{ 
-                                padding: '10px 16px', 
-                                border: '2px dashed var(--color-border-light)', 
-                                borderRadius: '8px', 
-                                background: 'var(--color-surface-2)', 
-                                color: 'var(--color-text-muted)',
-                                cursor: 'pointer',
-                                fontSize: '14px',
-                                fontWeight: 500,
-                                maxWidth: '300px',
-                                transition: 'border-color 0.2s'
-                            }}
-                            onMouseOver={(e) => e.currentTarget.style.borderColor = '#94a3b8'}
-                            onMouseOut={(e) => e.currentTarget.style.borderColor = '#cbd5e1'}
-                        />
-                    </div>
-                </div>
+
+                        {/* Feature Insights Grid (Neat & Clean Empty State Showcase) */}
+                        {excelData.length === 0 && (
+                            <div className="feature-showcase-grid">
+                                <div className="feature-card">
+                                    <div className="feature-card-icon" style={{ background: 'rgba(37, 99, 235, 0.1)', color: '#2563eb' }}>
+                                        <ScanLine size={20} />
+                                    </div>
+                                    <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#0f172a' }}>
+                                        AI Chassis Metal OCR
+                                    </h4>
+                                    <p style={{ margin: 0, fontSize: '13px', color: '#64748b', lineHeight: 1.5 }}>
+                                        Reads embossed metal VINs directly from inspection photos, automatically correcting for dust, angle, and harsh lighting.
+                                    </p>
+                                </div>
+
+                                <div className="feature-card">
+                                    <div className="feature-card-icon" style={{ background: 'rgba(16, 185, 129, 0.1)', color: '#059669' }}>
+                                        <MapPin size={20} />
+                                    </div>
+                                    <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#0f172a' }}>
+                                        GPS Geofencing &amp; Audit
+                                    </h4>
+                                    <p style={{ margin: 0, fontSize: '13px', color: '#64748b', lineHeight: 1.5 }}>
+                                        Extracts camera EXIF coordinates and watermark stamps to guarantee the vehicle was examined at authorized dealership grounds.
+                                    </p>
+                                </div>
+
+                                <div className="feature-card">
+                                    <div className="feature-card-icon" style={{ background: 'rgba(139, 92, 246, 0.1)', color: '#7c3aed' }}>
+                                        <ShieldCheck size={20} />
+                                    </div>
+                                    <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#0f172a' }}>
+                                        Automated Validation
+                                    </h4>
+                                    <p style={{ margin: 0, fontSize: '13px', color: '#64748b', lineHeight: 1.5 }}>
+                                        Instant character-by-character comparison highlighting mismatches, tampering, or clerical discrepancies with 1-click Excel export.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
 
                 {/* Data Table Section */}
                 {excelData.length > 0 && (
-                    <div style={{ 
-                        background: 'var(--color-surface)', 
-                        borderRadius: '12px', 
-                        border: '1px solid var(--color-border)',
-                        boxShadow: 'var(--shadow-md)',
+                    <div className="glass-panel" style={{ 
                         overflow: 'hidden',
                         display: 'flex',
                         flexDirection: 'column'
@@ -669,9 +920,9 @@ const AdminDashboard: React.FC = () => {
                         
                         {/* Action Bar */}
                         <div style={{ 
-                            padding: '20px 24px', 
-                            borderBottom: '1px solid var(--color-border)',
-                            background: 'var(--color-surface-2)',
+                            padding: '20px 28px', 
+                            borderBottom: '1px solid rgba(226, 232, 240, 0.9)',
+                            background: '#f8fafc',
                             display: 'flex', 
                             justifyContent: 'space-between', 
                             alignItems: 'center', 
@@ -680,170 +931,123 @@ const AdminDashboard: React.FC = () => {
                         }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
                                 <div>
-                                    <span style={{ fontSize: '16px', fontWeight: 700, color: 'var(--color-text)' }}>{fileName}</span>
-                                    <div style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
-                                        <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text-muted)', background: '#e2e8f0', padding: '4px 10px', borderRadius: '6px' }}>
-                                            {excelData.length} total
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        <FileSpreadsheet size={18} color="#2563eb" />
+                                        <span style={{ fontSize: '15.5px', fontWeight: 700, color: '#0f172a' }}>{fileName}</span>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
+                                        <span className="modern-stat-chip total">
+                                            <Layers size={13} /> {excelData.length} Total
                                         </span>
-                                        <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-success)', background: 'var(--color-success-bg)', padding: '4px 10px', borderRadius: '6px' }}>
-                                            ✓ {matchCount} match
+                                        <span className="modern-stat-chip match">
+                                            <CheckCircle2 size={13} /> {matchCount} Match
                                         </span>
-                                        <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-danger)', background: 'var(--color-danger-bg)', padding: '4px 10px', borderRadius: '6px' }}>
-                                            ✗ {mismatchCount} mismatch
+                                        <span className="modern-stat-chip mismatch">
+                                            <XCircle size={13} /> {mismatchCount} Mismatch
                                         </span>
-                                        <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-primary)', background: '#dbeafe', padding: '4px 10px', borderRadius: '6px' }}>
-                                            {completedCount}/{excelData.length} done
+                                        <span className="modern-stat-chip done">
+                                            <Check size={13} /> {completedCount}/{excelData.length} Done
                                         </span>
                                     </div>
                                 </div>
                                 
                                 {/* Progress Bar */}
                                 <div style={{ width: '220px', marginLeft: '10px' }}>
-                                    <div style={{ background: '#e2e8f0', borderRadius: '8px', height: '8px', overflow: 'hidden' }}>
+                                    <div style={{ background: '#e2e8f0', borderRadius: '999px', height: '8px', overflow: 'hidden' }}>
                                         <div style={{ 
                                             width: `${progress}%`, 
                                             background: 'linear-gradient(90deg, #3b82f6, #2563eb)', 
                                             height: '100%', 
                                             transition: 'width 0.3s ease',
-                                            borderRadius: '8px'
+                                            borderRadius: '999px'
                                         }}></div>
                                     </div>
-                                    <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text-muted)', marginTop: '4px', display: 'block', textAlign: 'right' }}>{progress}% Complete</span>
+                                    <span style={{ fontSize: '11.5px', fontWeight: 600, color: 'var(--color-text-muted)', marginTop: '4px', display: 'block', textAlign: 'right' }}>{progress}% Complete</span>
                                 </div>
                             </div>
                             
-                            <div style={{ display: 'flex', gap: '12px' }}>
+                            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
                                 {!isProcessing || isPaused ? (
                                     <button 
                                         onClick={processImages} 
-                                        style={{ 
-                                            padding: '10px 20px', 
-                                            background: 'linear-gradient(135deg, #2563eb, #1d4ed8)', 
-                                            color: 'white', 
-                                            border: 'none', 
-                                            borderRadius: '8px', 
-                                            cursor: 'pointer', 
-                                            fontWeight: 600,
-                                            fontSize: '14px',
-                                            boxShadow: '0 2px 4px rgba(37, 99, 235, 0.2)',
-                                            transition: 'transform 0.1s'
-                                        }}
-                                        onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.98)'}
-                                        onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                                        className="modern-btn modern-btn-primary"
                                     >
-                                        {progress > 0 && progress < 100 ? '▶ Resume' : '🚀 Start Validation'}
+                                        <Play size={15} />
+                                        {progress > 0 && progress < 100 ? 'Resume' : 'Start Validation'}
                                     </button>
                                 ) : (
                                     <button 
                                         onClick={togglePause} 
-                                        style={{ 
-                                            padding: '10px 20px', 
-                                            background: '#f59e0b', 
-                                            color: '#fff', 
-                                            border: 'none', 
-                                            borderRadius: '8px', 
-                                            cursor: 'pointer', 
-                                            fontWeight: 600,
-                                            fontSize: '14px',
-                                            boxShadow: '0 2px 4px rgba(245, 158, 11, 0.2)'
-                                        }}
+                                        className="modern-btn"
+                                        style={{ background: '#f59e0b', color: '#fff', boxShadow: '0 4px 12px rgba(245, 158, 11, 0.25)' }}
                                     >
-                                        ⏸ Pause
+                                        <Pause size={15} />
+                                        Pause
                                     </button>
                                 )}
                                 
                                 <button 
                                     onClick={handleExport}
-                                    style={{ 
-                                        padding: '10px 20px', 
-                                        background: '#10b981', 
-                                        color: '#ffffff', 
-                                        border: 'none', 
-                                        borderRadius: '8px', 
-                                        cursor: 'pointer', 
-                                        fontWeight: 600,
-                                        fontSize: '14px',
-                                        boxShadow: '0 2px 4px rgba(16, 185, 129, 0.2)'
-                                    }}
+                                    disabled={completedCount === 0}
+                                    className="modern-btn modern-btn-success"
+                                    style={{ opacity: completedCount === 0 ? 0.5 : 1, cursor: completedCount === 0 ? 'not-allowed' : 'pointer' }}
                                 >
-                                    📥 Export Excel
+                                    <Download size={15} />
+                                    Export Excel
                                 </button>
                             </div>
                         </div>
                         
                         {/* Table */}
                         <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 'calc(100vh - 300px)', WebkitOverflowScrolling: 'touch', width: '100%' }}>
-                            <table style={{ width: '100%', minWidth: 'max-content', borderCollapse: 'collapse', fontSize: '14px' }}>
-                                <thead style={{ background: 'var(--color-surface-2)', position: 'sticky', top: 0, zIndex: 10, boxShadow: '0 2px 4px rgba(0,0,0,0.05)' }}>
-                                    <tr style={{ borderBottom: '2px solid var(--color-border)' }}>
-                                        <th style={{ padding: '14px 20px', textAlign: 'left', color: 'var(--color-text-muted)', fontWeight: 700, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap', position: 'sticky', left: 0, background: 'var(--color-surface-2)', zIndex: 12 }}>#</th>
-                                        {originalColumns.map((col, i) => {
-                                            const isSticky = i === 0;
-                                            return (
-                                                <th key={col} style={{ padding: '14px 20px', textAlign: 'left', color: 'var(--color-text-muted)', fontWeight: 700, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap', position: isSticky ? 'sticky' : 'static', left: isSticky ? '50px' : 'auto', background: isSticky ? '#f1f5f9' : 'transparent', zIndex: isSticky ? 11 : 'auto', boxShadow: isSticky ? '2px 0 4px rgba(0,0,0,0.05)' : 'none' }}>
-                                                    {col}
-                                                </th>
-                                            );
-                                        })}
-                                        <th style={{ padding: '14px 20px', textAlign: 'left', color: 'var(--color-text-muted)', fontWeight: 700, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>Extracted VIN</th>
-                                        <th style={{ padding: '14px 20px', textAlign: 'left', color: 'var(--color-text-muted)', fontWeight: 700, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>Geo Location</th>
-                                        <th style={{ padding: '14px 20px', textAlign: 'left', color: 'var(--color-text-muted)', fontWeight: 700, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>Match</th>
-                                        <th style={{ padding: '14px 20px', textAlign: 'left', color: 'var(--color-text-muted)', fontWeight: 700, fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.05em', whiteSpace: 'nowrap' }}>Status</th>
+                            <table className="modern-table">
+                                <thead>
+                                    <tr>
+                                        <th style={{ width: '50px' }}>#</th>
+                                        {originalColumns.map((col) => (
+                                            <th key={col}>{col}</th>
+                                        ))}
+                                        <th>Extracted VIN</th>
+                                        <th>Geo Location</th>
+                                        <th>Match Status</th>
+                                        <th>Status</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {excelData.map((row, index) => {
                                         const geo = row.geoLocation;
                                         return (
-                                            <tr key={index} style={{ borderBottom: '1px solid var(--color-border)', background: index % 2 === 0 ? '#ffffff' : '#f8fafc', transition: 'background 0.2s' }} onMouseOver={(e) => e.currentTarget.style.background = '#f1f5f9'} onMouseOut={(e) => e.currentTarget.style.background = index % 2 === 0 ? '#ffffff' : '#f8fafc'}>
-                                                <td style={{ padding: '12px 20px', color: 'var(--color-text-muted)', fontSize: '13px', fontWeight: 500, position: 'sticky', left: 0, background: 'inherit', zIndex: 2 }}>{index + 1}</td>
-                                                {originalColumns.map((col, colIndex) => {
+                                            <tr key={index}>
+                                                <td style={{ color: 'var(--color-text-muted)', fontWeight: 500 }}>{index + 1}</td>
+                                                {originalColumns.map((col) => {
                                                     const value = row[col];
                                                     const isValidDrive = isDriveLink(value);
-                                                    const isSticky = colIndex === 0;
                                                     return (
-                                                        <td key={col} style={{ padding: '12px 20px', maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', position: isSticky ? 'sticky' : 'static', left: isSticky ? '50px' : 'auto', background: 'inherit', zIndex: isSticky ? 2 : 'auto', boxShadow: isSticky ? '2px 0 4px rgba(0,0,0,0.02)' : 'none' }}>
+                                                        <td key={col} style={{ maxWidth: '240px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                                             {isValidDrive ? (
-                                                                <a href={value as string} target="_blank" rel="noreferrer" style={{ color: 'var(--color-primary)', textDecoration: 'none', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg>
-                                                                    Drive Image
+                                                                <a href={value as string} target="_blank" rel="noreferrer" style={{ color: '#2563eb', textDecoration: 'none', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                                                                    <ScanLine size={14} /> Drive Image
                                                                 </a>
                                                             ) : (
-                                                                <span style={{ fontWeight: 600, color: 'var(--color-text)', fontFamily: "'JetBrains Mono', monospace", fontSize: '14px' }}>{value}</span>
+                                                                <span className="vin-chip">{value}</span>
                                                             )}
                                                         </td>
                                                     );
                                                 })}
                                                 
                                                 {/* Extracted VIN */}
-                                                <td style={{ padding: '12px 20px' }}>
+                                                <td>
                                                     {(() => {
                                                         const isUnclear = !row.extractedVin || ['-', 'N/A', 'No text found', 'No VIN detected', 'Error API', 'Error Fetch'].includes(row.extractedVin);
                                                         if (isUnclear) {
                                                             return (
-                                                                <span style={{ 
-                                                                    padding: '4px 10px', 
-                                                                    borderRadius: '6px', 
-                                                                    fontSize: '12px',
-                                                                    fontWeight: 700,
-                                                                    background: 'var(--color-danger-bg)',
-                                                                    color: 'var(--color-danger)',
-                                                                    display: 'inline-block'
-                                                                }}>
-                                                                    Not Clear
+                                                                <span className="modern-badge modern-badge-danger">
+                                                                    <XCircle size={12} /> Not Clear
                                                                 </span>
                                                             );
                                                         }
                                                         return (
-                                                            <span style={{ 
-                                                                fontFamily: "'JetBrains Mono', monospace", 
-                                                                fontWeight: 700, 
-                                                                fontSize: '14px', 
-                                                                color: '#0ea5e9',
-                                                                background: '#f0f9ff',
-                                                                padding: '4px 8px',
-                                                                borderRadius: '4px'
-                                                            }}>
+                                                            <span className="vin-chip" style={{ color: '#0284c7', background: '#f0f9ff', borderColor: '#bae6fd' }}>
                                                                 {row.extractedVin}
                                                             </span>
                                                         );
@@ -851,53 +1055,53 @@ const AdminDashboard: React.FC = () => {
                                                 </td>
 
                                                 {/* Geo Location */}
-                                                <td style={{ padding: '12px 20px', minWidth: '220px' }}>
+                                                <td style={{ minWidth: '220px' }}>
                                                     {geo && (geo.latitude || geo.location || geo.dateTime) ? (
                                                         <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
                                                             {geo.latitude && geo.longitude && (
-                                                                <span style={{ color: '#0284c7', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                                                    📍 {geo.latitude}, {geo.longitude}
+                                                                <span style={{ color: '#0284c7', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                                                    <MapPin size={13} /> {geo.latitude}, {geo.longitude}
                                                                 </span>
                                                             )}
                                                             {geo.dateTime && (
-                                                                <span style={{ color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                                                                    🕒 {geo.dateTime}
+                                                                <span style={{ color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                                                    <Clock size={13} /> {geo.dateTime}
                                                                 </span>
                                                             )}
                                                             {geo.location && (
-                                                                <span style={{ color: 'var(--color-text)', maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: '4px' }} title={geo.location}>
+                                                                <span style={{ color: 'var(--color-text)', maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={geo.location}>
                                                                     🗺️ {geo.location}
                                                                 </span>
                                                             )}
                                                         </div>
-                                                    ) : geo?.watermarkText ? (
-                                                        <span style={{ fontSize: '12px', color: 'var(--color-text-muted)' }}>{geo.watermarkText.substring(0, 60)}...</span>
                                                     ) : (
                                                         <span style={{ color: 'var(--color-text-dim)' }}>—</span>
                                                     )}
                                                 </td>
 
                                                 {/* Match */}
-                                                <td style={{ padding: '12px 20px' }}>
-                                                    <span style={{ 
-                                                        padding: '4px 10px', 
-                                                        borderRadius: '6px', 
-                                                        fontSize: '12px',
-                                                        fontWeight: 700,
-                                                        background: row.isMatch === 'Match' ? '#d1fae5' : row.isMatch === 'Mismatch' ? '#fee2e2' : '#f1f5f9',
-                                                        color: row.isMatch === 'Match' ? '#059669' : row.isMatch === 'Mismatch' ? '#dc2626' : '#64748b',
-                                                        display: 'inline-block'
-                                                    }}>
-                                                        {row.isMatch === 'Match' ? '✓ MATCH' : row.isMatch === 'Mismatch' ? '✗ MISMATCH' : row.isMatch}
-                                                    </span>
+                                                <td>
+                                                    {row.isMatch === 'Match' ? (
+                                                        <span className="modern-badge modern-badge-success">
+                                                            <CheckCircle2 size={12} /> MATCH
+                                                        </span>
+                                                    ) : row.isMatch === 'Mismatch' ? (
+                                                        <span className="modern-badge modern-badge-danger">
+                                                            <XCircle size={12} /> MISMATCH
+                                                        </span>
+                                                    ) : (
+                                                        <span className="modern-badge modern-badge-warning">
+                                                            {row.isMatch || '—'}
+                                                        </span>
+                                                    )}
                                                 </td>
 
                                                 {/* Status */}
-                                                <td style={{ padding: '12px 20px', fontSize: '13px', fontWeight: 600 }}>
-                                                    {row.status === 'Processing' && <span style={{ color: 'var(--color-primary)', display: 'flex', alignItems: 'center', gap: '4px' }}>⚙ Reading...</span>}
-                                                    {row.status === 'Complete' && <span style={{ color: 'var(--color-success)', display: 'flex', alignItems: 'center', gap: '4px' }}>✓ Done</span>}
-                                                    {row.status === 'Error' && <span style={{ color: 'var(--color-danger)', display: 'flex', alignItems: 'center', gap: '4px' }}>⚠ Error</span>}
-                                                    {row.status === 'Pending' && <span style={{ color: 'var(--color-text-dim)' }}>⏳ Pending</span>}
+                                                <td>
+                                                    {row.status === 'Processing' && <span style={{ color: '#2563eb', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}><Clock size={14} /> Reading...</span>}
+                                                    {row.status === 'Complete' && <span style={{ color: '#16a34a', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}><CheckCircle2 size={14} /> Done</span>}
+                                                    {row.status === 'Error' && <span style={{ color: '#dc2626', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}><AlertTriangle size={14} /> Error</span>}
+                                                    {row.status === 'Pending' && <span style={{ color: 'var(--color-text-dim)', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '5px' }}><Clock size={14} /> Pending</span>}
                                                 </td>
                                             </tr>
                                         );
@@ -912,46 +1116,84 @@ const AdminDashboard: React.FC = () => {
 
                 {activeTab === 'Validator' && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-                        {/* Upload Card */}
-                        <div style={{ 
-                            background: 'var(--color-surface)', 
-                            padding: '20px 24px', 
-                            borderRadius: '12px', 
-                            border: '1px solid var(--color-border)',
-                            boxShadow: 'var(--shadow-md)',
-                            width: 'fit-content',
-                            maxWidth: '100%'
-                        }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', flexWrap: 'wrap', gap: '24px' }}>
-                                <div>
-                                    <h3 style={{ margin: '0 0 6px 0', fontSize: '16px', fontWeight: 700, color: 'var(--color-text)' }}>
-                                        🛡️ Upload Validation Matrix Excel
-                                    </h3>
-                                    <p style={{ color: 'var(--color-text-muted)', fontSize: '13px', margin: 0 }}>
-                                        Upload a generic Excel file to view it in the validator matrix format.
-                                    </p>
+                        {/* Upload Dropzone Card */}
+                        <div className="glass-panel" style={{ padding: '24px 28px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '20px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                                    <div className="dropzone-icon-box">
+                                        <ShieldCheck size={24} />
+                                    </div>
+                                    <div>
+                                        <h3 style={{ margin: '0 0 4px 0', fontSize: '16px', fontWeight: 700, color: '#0f172a' }}>
+                                            Upload Validation Matrix Excel
+                                        </h3>
+                                        <p style={{ color: 'var(--color-text-muted)', fontSize: '13px', margin: 0 }}>
+                                            Upload Excel matrix with VIN, Plant, and Date columns for decoding &amp; verification.
+                                        </p>
+                                    </div>
                                 </div>
-                                <input
-                                    type="file"
-                                    accept=".xlsx, .xls, .csv"
-                                    onChange={handleValidatorFileUpload}
-                                    onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
-                                    style={{ 
-                                        padding: '10px 16px', 
-                                        border: '2px dashed var(--color-border-light)', 
-                                        borderRadius: '8px', 
-                                        background: 'var(--color-surface-2)', 
-                                        color: 'var(--color-text-muted)',
-                                        cursor: 'pointer',
-                                        fontSize: '14px',
-                                        fontWeight: 500,
-                                        maxWidth: '300px',
-                                        width: '100%',
-                                        boxSizing: 'border-box'
-                                    }}
-                                />
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                                    <label className="modern-btn modern-btn-primary" style={{ cursor: 'pointer', margin: 0 }}>
+                                        <UploadCloud size={16} />
+                                        Browse Matrix
+                                        <input
+                                            type="file"
+                                            accept=".xlsx, .xls, .csv"
+                                            onChange={handleValidatorFileUpload}
+                                            onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
+                                            style={{ display: 'none' }}
+                                        />
+                                    </label>
+                                    <button
+                                        onClick={handleDownloadValidatorTemplate}
+                                        className="modern-btn modern-btn-outline"
+                                        title="Download sample Excel template for Validation Matrix with VIN, Plant, and Date columns"
+                                    >
+                                        <Download size={15} />
+                                        Download Template
+                                    </button>
+                                </div>
                             </div>
                         </div>
+
+                        {/* Feature Insights Grid (When Empty) */}
+                        {valData.length === 0 && !valIsLoading && (
+                            <div className="feature-showcase-grid">
+                                <div className="feature-card">
+                                    <div className="feature-card-icon" style={{ background: 'rgba(37, 99, 235, 0.1)', color: '#2563eb' }}>
+                                        <ShieldCheck size={20} />
+                                    </div>
+                                    <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#0f172a' }}>
+                                        Matrix Standard Validation
+                                    </h4>
+                                    <p style={{ margin: 0, fontSize: '13px', color: '#64748b', lineHeight: 1.5 }}>
+                                        Cross-analyzes plant production batches against master dealership allocation files.
+                                    </p>
+                                </div>
+                                <div className="feature-card">
+                                    <div className="feature-card-icon" style={{ background: 'rgba(16, 185, 129, 0.1)', color: '#059669' }}>
+                                        <Layers size={20} />
+                                    </div>
+                                    <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#0f172a' }}>
+                                        Dynamic Column Filter
+                                    </h4>
+                                    <p style={{ margin: 0, fontSize: '13px', color: '#64748b', lineHeight: 1.5 }}>
+                                        Customize which metadata fields are visible and export precisely configured reports.
+                                    </p>
+                                </div>
+                                <div className="feature-card">
+                                    <div className="feature-card-icon" style={{ background: 'rgba(139, 92, 246, 0.1)', color: '#7c3aed' }}>
+                                        <Download size={20} />
+                                    </div>
+                                    <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#0f172a' }}>
+                                        Full Audit Trail Export
+                                    </h4>
+                                    <p style={{ margin: 0, fontSize: '13px', color: '#64748b', lineHeight: 1.5 }}>
+                                        Generate compliant spreadsheets ready for enterprise accounting and warranty auditing.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
 
                         {valIsLoading && (
                             <div style={{ textAlign: 'center', padding: '40px', color: 'var(--color-text-muted)' }}>
@@ -961,14 +1203,18 @@ const AdminDashboard: React.FC = () => {
                         )}
 
                         {valData.length > 0 && !valIsLoading && (
-                            <div style={{ background: 'var(--color-surface)', borderRadius: '12px', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-md)' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 24px', borderBottom: '1px solid var(--color-border)' }}>
+                            <div className="glass-panel" style={{ overflow: 'hidden' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 28px', borderBottom: '1px solid rgba(226, 232, 240, 0.9)', background: '#f8fafc', flexWrap: 'wrap', gap: '16px' }}>
                                     <div>
-                                        <h4 style={{ margin: 0, color: 'var(--color-text)' }}>Parsed Validation Matrix ({valData.length} records)</h4>
-                                        <p style={{ color: 'var(--color-text-muted)', fontSize: '13px', margin: '4px 0 0 0' }}>All rows and components successfully extracted.</p>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                            <FileSpreadsheet size={18} color="#2563eb" />
+                                            <h4 style={{ margin: 0, fontSize: '15.5px', fontWeight: 700, color: '#0f172a' }}>Parsed Validation Matrix</h4>
+                                            <span className="modern-stat-chip total">{valData.length} records</span>
+                                        </div>
+                                        <p style={{ color: 'var(--color-text-muted)', fontSize: '12.5px', margin: '4px 0 0 0' }}>All rows and decoded VIN attributes successfully verified.</p>
                                     </div>
                                     {/* Actions */}
-                                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                                    <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
                                         <div style={{ position: 'relative' }}>
                                             <input 
                                                 type="text" 
@@ -979,36 +1225,22 @@ const AdminDashboard: React.FC = () => {
                                                     padding: '10px 14px 10px 36px',
                                                     border: '1px solid var(--color-border-light)',
                                                     borderRadius: '8px',
-                                                    fontSize: '14px',
-                                                    fontFamily: 'Inter, Poppins, sans-serif',
-                                                    width: '240px',
+                                                    fontSize: '13px',
+                                                    fontFamily: 'var(--font-body)',
+                                                    width: '230px',
                                                     outline: 'none',
-                                                    transition: 'border-color 0.2s, box-shadow 0.2s',
+                                                    transition: 'all 0.2s',
                                                     color: 'var(--color-text)'
                                                 }}
-                                                onFocus={(e) => {
-                                                    e.target.style.borderColor = '#3b82f6';
-                                                    e.target.style.boxShadow = '0 0 0 3px rgba(59, 130, 246, 0.1)';
-                                                }}
-                                                onBlur={(e) => {
-                                                    e.target.style.borderColor = '#cbd5e1';
-                                                    e.target.style.boxShadow = 'none';
-                                                }}
                                             />
-                                            <svg style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-dim)' }} width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+                                            <Search size={15} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
                                         </div>
 
                                         <button 
                                             onClick={handleValDownload}
-                                            style={{
-                                                padding: '10px 16px', background: '#10b981', border: 'none', borderRadius: '8px', cursor: 'pointer', fontSize: '14px', fontWeight: 600, color: '#ffffff', display: 'flex', gap: '8px', alignItems: 'center', fontFamily: 'Inter, Poppins, sans-serif', transition: 'background-color 0.2s, transform 0.1s'
-                                            }}
-                                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#059669'}
-                                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#10b981'}
-                                            onMouseDown={(e) => e.currentTarget.style.transform = 'scale(0.97)'}
-                                            onMouseUp={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                                            className="modern-btn modern-btn-success"
                                         >
-                                            <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" /></svg>
+                                            <Download size={15} />
                                             Export Excel
                                         </button>
                                         
@@ -1016,14 +1248,10 @@ const AdminDashboard: React.FC = () => {
                                         <div style={{ position: 'relative' }}>
                                             <button 
                                                 onClick={() => setShowValColumnFilter(!showValColumnFilter)}
-                                                style={{
-                                                    padding: '10px 16px', background: 'var(--color-surface)', border: '1px solid var(--color-border-light)', borderRadius: '8px', cursor: 'pointer', fontSize: '14px', fontWeight: 600, color: 'var(--color-text)', display: 'flex', gap: '8px', alignItems: 'center', fontFamily: 'Inter, Poppins, sans-serif', transition: 'background-color 0.2s'
-                                                }}
-                                                onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#f8fafc'}
-                                                onMouseLeave={(e) => e.currentTarget.style.backgroundColor = '#ffffff'}
+                                                className="modern-btn modern-btn-secondary"
                                             >
-                                                <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                                                Columns
+                                                <SlidersHorizontal size={14} />
+                                                Select Columns
                                             </button>
                                             
                                             {showValColumnFilter && (
@@ -1147,50 +1375,89 @@ const AdminDashboard: React.FC = () => {
 
                 {activeTab === 'Questionnaire Validation' && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-                        {/* Upload Card */}
-                        <div style={{ 
-                            background: 'var(--color-surface)', 
-                            padding: '20px 24px', 
-                            borderRadius: '12px', 
-                            border: '1px solid var(--color-border)',
-                            boxShadow: 'var(--shadow-md)',
-                            width: 'fit-content',
-                            maxWidth: '100%'
-                        }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-start', flexWrap: 'wrap', gap: '24px' }}>
-                                <div>
-                                    <h3 style={{ margin: '0 0 6px 0', fontSize: '16px', fontWeight: 700, color: 'var(--color-text)' }}>
-                                        📋 Upload Questionnaire (NPS TGW) Excel
-                                    </h3>
-                                    <p style={{ color: 'var(--color-text-muted)', fontSize: '13px', margin: 0 }}>
-                                        Upload the questionnaire mapping file to visualize the hierarchy and validate structure.
-                                    </p>
+                        {/* Upload Dropzone Card */}
+                        <div className="glass-panel" style={{ padding: '24px 28px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '20px' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                                    <div className="dropzone-icon-box">
+                                        <ClipboardList size={24} />
+                                    </div>
+                                    <div>
+                                        <h3 style={{ margin: '0 0 4px 0', fontSize: '16px', fontWeight: 700, color: '#0f172a' }}>
+                                            Upload Questionnaire (NPS TGW) Excel
+                                        </h3>
+                                        <p style={{ color: 'var(--color-text-muted)', fontSize: '13px', margin: 0 }}>
+                                            Upload questionnaire mapping file to visualize category hierarchy and auto-validate rules.
+                                        </p>
+                                    </div>
                                 </div>
-                                <input
-                                    type="file"
-                                    accept=".xlsx, .xls, .csv"
-                                    onChange={handleQuestFileUpload}
-                                    onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
-                                    style={{ 
-                                        padding: '10px 16px', 
-                                        border: '2px dashed var(--color-border-light)', 
-                                        borderRadius: '8px', 
-                                        background: 'var(--color-surface-2)', 
-                                        color: 'var(--color-text-muted)',
-                                        cursor: 'pointer',
-                                        fontSize: '14px',
-                                        fontWeight: 500,
-                                        maxWidth: '300px',
-                                        transition: 'border-color 0.2s'
-                                    }}
-                                />
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                                    <label className="modern-btn modern-btn-primary" style={{ cursor: 'pointer', margin: 0 }}>
+                                        <UploadCloud size={16} />
+                                        Browse Questionnaire
+                                        <input
+                                            type="file"
+                                            accept=".xlsx, .xls, .csv"
+                                            onChange={handleQuestFileUpload}
+                                            onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
+                                            style={{ display: 'none' }}
+                                        />
+                                    </label>
+                                    <button
+                                        onClick={handleDownloadQuestTemplate}
+                                        className="modern-btn modern-btn-outline"
+                                        title="Download sample Excel template with Complaint Group L2, Sub Complaint L3, and Category columns"
+                                    >
+                                        <Download size={15} />
+                                        Download Template
+                                    </button>
+                                </div>
                             </div>
                         </div>
 
+                        {/* Feature Insights Grid (When Empty) */}
+                        {questData.length === 0 && !questIsLoading && (
+                            <div className="feature-showcase-grid">
+                                <div className="feature-card">
+                                    <div className="feature-card-icon" style={{ background: 'rgba(37, 99, 235, 0.1)', color: '#2563eb' }}>
+                                        <ClipboardList size={20} />
+                                    </div>
+                                    <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#0f172a' }}>
+                                        TGW Bucket Hierarchy
+                                    </h4>
+                                    <p style={{ margin: 0, fontSize: '13px', color: '#64748b', lineHeight: 1.5 }}>
+                                        Structure customer feedback across L2 complaint groups and L3 sub-complaint categories.
+                                    </p>
+                                </div>
+                                <div className="feature-card">
+                                    <div className="feature-card-icon" style={{ background: 'rgba(16, 185, 129, 0.1)', color: '#059669' }}>
+                                        <CheckCircle2 size={20} />
+                                    </div>
+                                    <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#0f172a' }}>
+                                        Acceptance Logic Verification
+                                    </h4>
+                                    <p style={{ margin: 0, fontSize: '13px', color: '#64748b', lineHeight: 1.5 }}>
+                                        Auto-evaluates question matrix combinations to tag rows as Accepted or highlight missing values.
+                                    </p>
+                                </div>
+                                <div className="feature-card">
+                                    <div className="feature-card-icon" style={{ background: 'rgba(139, 92, 246, 0.1)', color: '#7c3aed' }}>
+                                        <FileSpreadsheet size={20} />
+                                    </div>
+                                    <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#0f172a' }}>
+                                        Instant Clean Export
+                                    </h4>
+                                    <p style={{ margin: 0, fontSize: '13px', color: '#64748b', lineHeight: 1.5 }}>
+                                        Export validated buckets directly into executive reports and dealer audit logs.
+                                    </p>
+                                </div>
+                            </div>
+                        )}
+
                         {/* Error State */}
                         {questError && (
-                            <div style={{ padding: '16px 20px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', color: 'var(--color-danger)', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                                <span style={{ fontSize: '24px' }}>⚠️</span>
+                            <div style={{ padding: '16px 20px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '12px', color: 'var(--color-danger)', display: 'flex', alignItems: 'center', gap: '12px' }}>
+                                <AlertTriangle size={24} color="#dc2626" />
                                 <div>
                                     <h4 style={{ margin: '0 0 4px 0', fontSize: '14px', fontWeight: 700 }}>Format Mismatch</h4>
                                     <p style={{ margin: 0, fontSize: '13px' }}>{questError}</p>
@@ -1200,38 +1467,34 @@ const AdminDashboard: React.FC = () => {
 
                         {/* Loading State */}
                         {questIsLoading && (
-                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '300px', background: 'var(--color-surface)', borderRadius: '12px', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-md)' }}>
-                                <div style={{ fontSize: '48px', marginBottom: '16px', animation: 'spin 2s linear infinite' }}>⏳</div>
+                            <div className="glass-panel" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '300px' }}>
+                                <div style={{ fontSize: '40px', marginBottom: '16px', animation: 'spin 2s linear infinite' }}>⏳</div>
                                 <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', color: 'var(--color-text)' }}>Parsing Excel File...</h3>
-                                <p style={{ color: 'var(--color-text-muted)', margin: 0 }}>Processing rows and analyzing structure.</p>
+                                <p style={{ color: 'var(--color-text-muted)', margin: 0, fontSize: '13px' }}>Processing rows and analyzing structure.</p>
                             </div>
                         )}
 
                         {/* Extracted Data Table */}
                         {!questIsLoading && questData.length > 0 && (
-                            <div style={{ 
-                                background: 'var(--color-surface)', 
-                                borderRadius: '12px', 
-                                border: '1px solid var(--color-border)',
-                                boxShadow: 'var(--shadow-md)',
-                                display: 'flex',
-                                flexDirection: 'column'
-                            }}>
-                                <div style={{ position: 'relative', zIndex: 100, padding: '20px 24px', borderBottom: '1px solid var(--color-border)', background: 'var(--color-surface-2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTopLeftRadius: '12px', borderTopRightRadius: '12px' }}>
+                            <div className="glass-panel" style={{ overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+                                <div style={{ position: 'relative', zIndex: 100, padding: '20px 28px', borderBottom: '1px solid rgba(226, 232, 240, 0.9)', background: '#f8fafc', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
                                     <div>
-                                        <h4 style={{ margin: 0, color: 'var(--color-text)' }}>Parsed Questionnaire Matrix ({questData.length} records)</h4>
-                                        <p style={{ color: 'var(--color-text-muted)', fontSize: '13px', margin: '4px 0 0 0' }}>All rows and components successfully extracted.</p>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                            <FileSpreadsheet size={18} color="#2563eb" />
+                                            <h4 style={{ margin: 0, fontSize: '15.5px', fontWeight: 700, color: '#0f172a' }}>Parsed Questionnaire Matrix</h4>
+                                            <span className="modern-stat-chip total">{questData.length} records</span>
+                                        </div>
+                                        <p style={{ color: 'var(--color-text-muted)', fontSize: '12.5px', margin: '4px 0 0 0' }}>All rows and components successfully extracted.</p>
                                     </div>
                                     
                                     {/* Column Filter Toggle */}
                                     <div style={{ position: 'relative' }}>
                                         <button 
                                             onClick={() => setShowColumnFilter(!showColumnFilter)}
-                                            style={{
-                                                padding: '8px 16px', background: 'var(--color-surface)', border: '1px solid var(--color-border-light)', borderRadius: '6px', cursor: 'pointer', fontSize: '13px', fontWeight: 600, color: 'var(--color-text-muted)', display: 'flex', gap: '8px', alignItems: 'center'
-                                            }}
+                                            className="modern-btn modern-btn-secondary"
                                         >
-                                            ⚙️ Select Columns
+                                            <SlidersHorizontal size={14} />
+                                            Select Columns
                                         </button>
                                         
                                         {showColumnFilter && (
@@ -1353,6 +1616,10 @@ const AdminDashboard: React.FC = () => {
                             </div>
                         )}
                     </div>
+                )}
+
+                {activeTab === 'NPS Analyzer' && (
+                    <NpsAnalyzer />
                 )}
 
             </main>
