@@ -21,9 +21,7 @@ import {
     LogOut,
     Sparkles,
     Check,
-    Layers,
-    FileText,
-    RotateCcw
+    Layers
 } from 'lucide-react';
 import { API_URL } from './api';
 import './Dashboard.css';
