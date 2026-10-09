@@ -56,7 +56,7 @@ export default function HomeScreen() {
             <StatusBar style="light" />
             <View style={styles.header}>
                 <View>
-                    <Text style={styles.headerTitle}>VIN Inspector</Text>
+                    <Text style={styles.headerTitle}>VIN_IB Inspector</Text>
                     <Text style={styles.headerSubtitle}>Welcome, {authStore.mechanicName || 'Mechanic'}</Text>
                 </View>
                 <TouchableOpacity onPress={handleLogout}>

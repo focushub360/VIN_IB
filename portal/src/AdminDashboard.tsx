@@ -50,7 +50,7 @@ const AdminDashboard: React.FC = () => {
     const [isProcessing, setIsProcessing] = useState(false);
     const [isPaused, setIsPaused] = useState(false);
     const [progress, setProgress] = useState(0);
-    const [activeTab, setActiveTab] = useState('VIN Inspector');
+    const [activeTab, setActiveTab] = useState('VIN_IB Inspector');
 
     const [questData, setQuestData] = useState<any[]>([]);
     const [questColumns, setQuestColumns] = useState<string[]>([]);
@@ -93,7 +93,7 @@ const AdminDashboard: React.FC = () => {
         XLSX.writeFile(wb, "Validator_Export.xlsx");
     };
 
-    // Download Sample Excel Template for VIN Inspector
+    // Download Sample Excel Template for VIN_IB Inspector
     const handleDownloadVinTemplate = () => {
         const templateData = [
             {
@@ -118,10 +118,10 @@ const AdminDashboard: React.FC = () => {
         const ws = XLSX.utils.json_to_sheet(templateData);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, "VIN_Validation");
-        XLSX.writeFile(wb, "VIN_Inspector_Template.xlsx");
+        XLSX.writeFile(wb, "VIN_IB_Inspector_Template.xlsx");
     };
 
-    // Load rich sample dataset for instant interactive test in VIN Inspector
+    // Load rich sample dataset for instant interactive test in VIN_IB Inspector
     const handleLoadSampleVinData = () => {
         setFileName("Sample_Automotive_Inspection_Batch.xlsx");
         setOriginalColumns(["Expected VIN", "Google Drive Image Link", "Vehicle Model", "Customer Name"]);
@@ -756,13 +756,21 @@ const AdminDashboard: React.FC = () => {
             {/* Glossy Modern Header */}
             <header className="glossy-header">
                 <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-                    <div className="brand-badge">
-                        <ScanLine size={22} color="#ffffff" />
-                    </div>
+                    <img 
+                        src="/assets/focus_logo.png" 
+                        alt="Focus Engineering Logo" 
+                        style={{ 
+                            height: "46px", 
+                            width: "auto", 
+                            objectFit: "contain",
+                            display: "block"
+                        }} 
+                    />
+                    <div style={{ width: "1px", height: "32px", background: "rgba(226, 232, 240, 0.9)" }} />
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                             <h2 style={{ margin: 0, fontSize: "17px", fontWeight: 800, letterSpacing: "-0.02em", color: "#0f172a" }}>
-                                AutoVIN Intelligence
+                                VIN_IB Inspector
                             </h2>
                             <span className="live-indicator">
                                 <span className="live-dot" />
@@ -798,7 +806,7 @@ const AdminDashboard: React.FC = () => {
             <div className="glass-tabs-nav-bar">
                 <div className="glass-tabs-container">
                     {[
-                        { name: 'VIN Inspector', icon: <ScanLine size={16} /> },
+                        { name: 'VIN_IB Inspector', icon: <ScanLine size={16} /> },
                         { name: 'Validator', icon: <ShieldCheck size={16} /> },
                         { name: 'Questionnaire Validation', icon: <ClipboardList size={16} /> },
                         { name: 'NPS Analyzer', icon: <BarChart3 size={16} /> }
@@ -817,7 +825,7 @@ const AdminDashboard: React.FC = () => {
 
             <main style={{ padding: '28px 36px', maxWidth: '1600px', margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
                 
-                {activeTab === 'VIN Inspector' && (
+                {activeTab === 'VIN_IB Inspector' && (
                     <>
                         {/* Upload Dropzone Card */}
                         <div className="glass-panel" style={{ padding: '24px 28px', marginBottom: '24px' }}>

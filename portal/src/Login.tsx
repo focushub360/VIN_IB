@@ -31,7 +31,14 @@ const Login: React.FC = () => {
     return (
         <div className="login-container">
             <div className="login-card">
-                <h1>VIN Inspector</h1>
+                <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '14px' }}>
+                    <img 
+                        src="/assets/focus_logo.png" 
+                        alt="Focus Engineering Logo" 
+                        style={{ height: "56px", objectFit: "contain" }} 
+                    />
+                </div>
+                <h1>VIN_IB Inspector</h1>
                 <p>Secure Portal Login</p>
 
                 <div className="role-toggles">

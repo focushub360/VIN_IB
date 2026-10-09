@@ -38,7 +38,7 @@ export default function LoginScreen() {
             <StatusBar style="light" />
             <View style={styles.content}>
                 <View style={styles.header}>
-                    <Text style={styles.title}>VIN Inspector</Text>
+                    <Text style={styles.title}>VIN_IB Inspector</Text>
                     <Text style={styles.subtitle}>Mechanic Login</Text>
                 </View>
 

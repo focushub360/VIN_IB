@@ -22,7 +22,7 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Health check endpoint
 app.get('/', (req, res) => {
-    res.json({ status: 'ok', message: 'VIN Inspector API is running' });
+    res.json({ status: 'ok', message: 'VIN_IB Inspector API is running' });
 });
 
 // Ensure upload directory exists

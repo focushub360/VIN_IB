@@ -159,7 +159,14 @@ const TenantDashboard: React.FC = () => {
     return (
         <div className="dashboard-layout">
             <header className="navbar tenant-nav">
-                <h2>Tenant Portal</h2>
+                <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+                    <img 
+                        src="/assets/focus_logo.png" 
+                        alt="Focus Engineering Logo" 
+                        style={{ height: "38px", objectFit: "contain", background: "white", padding: "3px 6px", borderRadius: "8px" }} 
+                    />
+                    <h2 style={{ margin: 0 }}>VIN_IB Inspector &middot; Tenant Portal</h2>
+                </div>
                 <div className="nav-tabs">
                     <button className={activeTab === 'feed' ? 'active' : ''} onClick={() => setActiveTab('feed')}>Inspections</button>
                     <button className={activeTab === 'analytics' ? 'active' : ''} onClick={() => setActiveTab('analytics')}>Analytics</button>

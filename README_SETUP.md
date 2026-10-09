@@ -1,4 +1,4 @@
-# VIN Inspector System Setup
+# VIN_IB Inspector System Setup
 
 This project now contains three components:
 1.  **Mobile App** (`/app`)
