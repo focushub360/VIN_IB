@@ -337,7 +337,7 @@ const AdminDashboard: React.FC = () => {
 
     const isDriveLink = (value: any): boolean => {
         if (typeof value !== 'string') return false;
-        return value.includes('drive.google.com');
+        return value.includes('drive.google.com') || value.includes('/uploads/vin_images/') || value.startsWith('http://') || value.startsWith('https://');
     };
 
     const handleQuestFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -778,7 +778,7 @@ const AdminDashboard: React.FC = () => {
                             </span>
                         </div>
                         <span style={{ fontSize: "12px", color: "var(--color-text-muted)", fontWeight: 500 }}>
-                            Automotive Chassis Inspection &middot; Geofence Verification &middot; NPS Intelligence
+                            Automotive Chassis Inspection &middot; Geofence Verification &middot; AI Data Entry
                         </span>
                     </div>
                 </div>
@@ -802,14 +802,14 @@ const AdminDashboard: React.FC = () => {
                 </button>
             </header>
 
-            {/* Navigation Tabs - Modern Segmented Floating Pill Bar */}
-            <div className="glass-tabs-nav-bar">
+            {/* Navigation Tabs - Modern Segmented Floating Pill Bar Centered */}
+            <div className="glass-tabs-nav-bar" style={{ display: 'flex', justifyContent: 'center', width: '100%' }}>
                 <div className="glass-tabs-container">
                     {[
                         { name: 'VIN_IB Inspector', icon: <ScanLine size={16} /> },
                         { name: 'Validator', icon: <ShieldCheck size={16} /> },
                         { name: 'Questionnaire Validation', icon: <ClipboardList size={16} /> },
-                        { name: 'NPS Analyzer', icon: <BarChart3 size={16} /> }
+                        { name: 'AI Data Entry', icon: <Sparkles size={16} /> }
                     ].map(({ name, icon }) => (
                         <button
                             key={name}
@@ -823,7 +823,13 @@ const AdminDashboard: React.FC = () => {
                 </div>
             </div>
 
-            <main style={{ padding: '28px 36px', maxWidth: '1600px', margin: '0 auto', width: '100%', boxSizing: 'border-box' }}>
+            <main style={{
+                padding: activeTab === 'AI Data Entry' ? '14px 18px' : '28px 36px',
+                maxWidth: activeTab === 'AI Data Entry' ? '100%' : '1600px',
+                margin: '0 auto',
+                width: '100%',
+                boxSizing: 'border-box'
+            }}>
                 
                 {activeTab === 'VIN_IB Inspector' && (
                     <>
@@ -1533,7 +1539,7 @@ const AdminDashboard: React.FC = () => {
                                                 <th style={{ padding: '6px 12px', textAlign: 'left', color: 'var(--color-text)', border: '1px solid var(--color-border-light)', width: '50px' }}>#</th>
                                                 {questColumns.map((col, idx) => (
                                                     questVisibleCols[col] ? (
-                                                        <th key={idx} style={{ padding: '6px 12px', textAlign: 'left', color: 'var(--color-text)', border: '1px solid var(--color-border-light)', width: '200px', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                                        <th key={idx} style={{ padding: '8px 12px', textAlign: 'left', verticalAlign: 'top', color: 'var(--color-text)', border: '1px solid var(--color-border-light)', minWidth: '180px', maxWidth: '300px', whiteSpace: 'normal', wordBreak: 'break-word', lineHeight: 1.35, fontSize: '12.5px', fontWeight: 600 }}>
                                                             {col}
                                                         </th>
                                                     ) : null
@@ -1624,9 +1630,9 @@ const AdminDashboard: React.FC = () => {
                     </div>
                 )}
 
-                {activeTab === 'NPS Analyzer' && (
+                <div style={{ display: activeTab === 'AI Data Entry' ? 'block' : 'none' }}>
                     <NpsAnalyzer />
-                )}
+                </div>
 
             </main>
         </div>

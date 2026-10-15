@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { API_URL } from './api';
 import {
@@ -13,25 +13,24 @@ import {
     FileSpreadsheet,
     ChevronLeft,
     ChevronRight,
+    ChevronDown,
+    ChevronUp,
+    ChevronsLeft,
+    ChevronsRight,
     UploadCloud,
     Square,
     Layers,
     RotateCcw
 } from 'lucide-react';
 
-// Sample 10 pre-extracted rows
-const SAMPLE_EXTRACTED_PDF_ROWS = [
-    { '#': 1, 'Document Source': 'Survey_Batch_001.pdf', 'Customer Name': 'Rajesh Sharma', 'Mobile': '0772161819', 'Location': 'Colombo / Pune', 'Date': '2026-09-12', 'Brand': 'Hero', 'Vehicle Model': 'Xtreme 160R', 'Form VIN': 'MBLJAU021TG805557', 'Stamped Metal VIN': 'MBLJAU021TG805557', 'VIN Match Status': '✅ Match', 'Odometer Reading': '18,400 km', 'Dealer / Workshop': 'Central Hub', 'Product NPS Score': 10, 'Product Sentiment': 'Promoter', 'Product Feedback': 'Exceptional driving comfort and highway stability. Loved the quick pickup!', 'Service NPS Score': 10, 'Service Sentiment': 'Promoter', 'Service Feedback': 'First free service was completed within 90 minutes.', 'GPS Watermark Location': 'Colombo, Sri Lanka', 'GPS Coordinates': '6.9394, 79.8518', 'GPS Timestamp': '12/09/2026 10:28 AM' },
-    { '#': 2, 'Document Source': 'Survey_Batch_002.pdf', 'Customer Name': 'Ananya Iyer', 'Mobile': '0717201142', 'Location': 'Bangalore', 'Date': '2026-09-14', 'Brand': 'TVS', 'Vehicle Model': 'Raider 125', 'Form VIN': 'MD625AF91TIAF7903', 'Stamped Metal VIN': 'MD625AF91TIAF7903', 'VIN Match Status': '✅ Match', 'Odometer Reading': '24,210 km', 'Dealer / Workshop': 'Prerana Motors', 'Product NPS Score': 9, 'Product Sentiment': 'Promoter', 'Product Feedback': 'Instant torque, silent ride, and high fuel economy.', 'Service NPS Score': 9, 'Service Sentiment': 'Promoter', 'Service Feedback': 'Prompt handling and courteous floor manager.', 'GPS Watermark Location': 'Bangalore, India', 'GPS Coordinates': '12.9716, 77.5946', 'GPS Timestamp': '14/09/2026 11:15 AM' },
-    { '#': 3, 'Document Source': 'Survey_Batch_003.pdf', 'Customer Name': 'Vikram Singh', 'Mobile': '0754891230', 'Location': 'Delhi', 'Date': '2026-09-15', 'Brand': 'Tata', 'Vehicle Model': 'Safari Dark Edition', 'Form VIN': 'MB4G09182K9L38192', 'Stamped Metal VIN': 'MB4G09182K9L38192', 'VIN Match Status': '✅ Match', 'Odometer Reading': '41,500 km', 'Dealer / Workshop': 'Arya Tata Delhi', 'Product NPS Score': 4, 'Product Sentiment': 'Detractor', 'Product Feedback': 'Loud squeaking noise from front brake pads during cold starts.', 'Service NPS Score': 4, 'Service Sentiment': 'Detractor', 'Service Feedback': 'Brake cleaning took over 4 hours with no advance notice.', 'GPS Watermark Location': 'Connaught Place, Delhi', 'GPS Coordinates': '28.6315, 77.2167', 'GPS Timestamp': '15/09/2026 03:20 PM' },
-    { '#': 4, 'Document Source': 'Survey_Batch_004.pdf', 'Customer Name': 'Pooja Verma', 'Mobile': '0729182740', 'Location': 'Mumbai', 'Date': '2026-09-16', 'Brand': 'Tata', 'Vehicle Model': 'Curvv EV', 'Form VIN': 'MZ8918274L1902834', 'Stamped Metal VIN': 'MZ8918274L1902834', 'VIN Match Status': '✅ Match', 'Odometer Reading': '8,300 km', 'Dealer / Workshop': 'Parihar Wheels', 'Product NPS Score': 5, 'Product Sentiment': 'Detractor', 'Product Feedback': 'Center touchscreen freezes occasionally when wireless CarPlay is active.', 'Service NPS Score': 6, 'Service Sentiment': 'Detractor', 'Service Feedback': 'Software update did not resolve the screen reboot issue.', 'GPS Watermark Location': 'Andheri West, Mumbai', 'GPS Coordinates': '19.1136, 72.8697', 'GPS Timestamp': '16/09/2026 09:40 AM' },
-    { '#': 5, 'Document Source': 'Survey_Batch_005.pdf', 'Customer Name': 'Karthik Nair', 'Mobile': '0789182341', 'Location': 'Kochi', 'Date': '2026-09-17', 'Brand': 'Hero', 'Vehicle Model': 'Glamour 125', 'Form VIN': 'MA3J91823M0192837', 'Stamped Metal VIN': 'MA3J91823M0192837', 'VIN Match Status': '✅ Match', 'Odometer Reading': '31,100 km', 'Dealer / Workshop': 'KHT Kochi', 'Product NPS Score': 8, 'Product Sentiment': 'Passive', 'Product Feedback': 'Engine is smooth, but headlight intensity in heavy rain feels dim.', 'Service NPS Score': 8, 'Service Sentiment': 'Passive', 'Service Feedback': 'Routine oil change executed smoothly.', 'GPS Watermark Location': 'Ernakulam, Kochi', 'GPS Coordinates': '9.9816, 76.2999', 'GPS Timestamp': '17/09/2026 04:10 PM' },
-    { '#': 6, 'Document Source': 'Survey_Batch_006.pdf', 'Customer Name': 'Amitabh Sen', 'Mobile': '0761928374', 'Location': 'Kolkata', 'Date': '2026-09-18', 'Brand': 'TVS', 'Vehicle Model': 'Apache RTR 160', 'Form VIN': 'MAT918274L0192831', 'Stamped Metal VIN': 'MAT918274L0192831', 'VIN Match Status': '✅ Match', 'Odometer Reading': '12,900 km', 'Dealer / Workshop': 'Dulichand Kolkata', 'Product NPS Score': 9, 'Product Sentiment': 'Promoter', 'Product Feedback': 'Aggressive styling and best-in-class exhaust note. Highly satisfied!', 'Service NPS Score': 9, 'Service Sentiment': 'Promoter', 'Service Feedback': 'Polite service advisor and clean washing bay.', 'GPS Watermark Location': 'Salt Lake, Kolkata', 'GPS Coordinates': '22.5867, 88.4178', 'GPS Timestamp': '18/09/2026 02:05 PM' },
-    { '#': 7, 'Document Source': 'Survey_Batch_007.pdf', 'Customer Name': 'Sneha Patel', 'Mobile': '0771928471', 'Location': 'Ahmedabad', 'Date': '2026-09-19', 'Brand': 'Tata', 'Vehicle Model': 'Harrier Fearless', 'Form VIN': 'MB5G91823K1029384', 'Stamped Metal VIN': 'MB5G91823K1029384', 'VIN Match Status': '✅ Match', 'Odometer Reading': '19,700 km', 'Dealer / Workshop': 'Cargo Motors', 'Product NPS Score': 3, 'Product Sentiment': 'Detractor', 'Product Feedback': 'Front parking sensor gave false alert beep in light monsoon rain.', 'Service NPS Score': 4, 'Service Sentiment': 'Detractor', 'Service Feedback': 'Part was not available in regional warehouse.', 'GPS Watermark Location': 'SG Highway, Ahmedabad', 'GPS Coordinates': '23.0338, 72.5850', 'GPS Timestamp': '19/09/2026 12:45 PM' },
-    { '#': 8, 'Document Source': 'Survey_Batch_008.pdf', 'Customer Name': 'Deepak Rao', 'Mobile': '0738192038', 'Location': 'Chennai', 'Date': '2026-09-20', 'Brand': 'Honda', 'Vehicle Model': 'Shine 125', 'Form VIN': 'MA3FB9182L0192834', 'Stamped Metal VIN': 'MA3FB9182L0192834', 'VIN Match Status': '✅ Match', 'Odometer Reading': '55,300 km', 'Dealer / Workshop': 'Tafesa Chennai', 'Product NPS Score': 10, 'Product Sentiment': 'Promoter', 'Product Feedback': 'Legendary reliability and buttery smooth gearbox shift.', 'Service NPS Score': 10, 'Service Sentiment': 'Promoter', 'Service Feedback': 'Delivered 30 minutes ahead of scheduled promise time.', 'GPS Watermark Location': 'Anna Nagar, Chennai', 'GPS Coordinates': '13.0850, 80.2101', 'GPS Timestamp': '20/09/2026 11:30 AM' },
-    { '#': 9, 'Document Source': 'Survey_Batch_009.pdf', 'Customer Name': 'Meera Deshmukh', 'Mobile': '0719283746', 'Location': 'Pune', 'Date': '2026-09-22', 'Brand': 'Bajaj', 'Vehicle Model': 'Pulsar N160', 'Form VIN': 'MAT019283K9182734', 'Stamped Metal VIN': 'MAT019283K9182734', 'VIN Match Status': '✅ Match', 'Odometer Reading': '22,400 km', 'Dealer / Workshop': 'Garve Pune', 'Product NPS Score': 2, 'Product Sentiment': 'Detractor', 'Product Feedback': 'Rear brake feels spongy and vehicle wobbles slightly above 75 km/h.', 'Service NPS Score': 3, 'Service Sentiment': 'Detractor', 'Service Feedback': 'Mechanic could not diagnose wheel balance issue.', 'GPS Watermark Location': 'Kothrud, Pune', 'GPS Coordinates': '18.5074, 73.8077', 'GPS Timestamp': '22/09/2026 05:15 PM' },
-    { '#': 10, 'Document Source': 'Survey_Batch_010.pdf', 'Customer Name': 'Divya Reddy', 'Mobile': '0791827463', 'Location': 'Hyderabad', 'Date': '2026-09-24', 'Brand': 'Hero', 'Vehicle Model': 'Passion Xtec', 'Form VIN': 'MAT910293N0192845', 'Stamped Metal VIN': 'MAT910293N0192845', 'VIN Match Status': '✅ Match', 'Odometer Reading': '14,800 km', 'Dealer / Workshop': 'Venkataramana Hyd', 'Product NPS Score': 10, 'Product Sentiment': 'Promoter', 'Product Feedback': 'Consistently getting 65+ km/l real-world mileage. Bluetooth caller ID works great.', 'Service NPS Score': 10, 'Service Sentiment': 'Promoter', 'Service Feedback': 'Courteous staff and transparent billing explanation.', 'GPS Watermark Location': 'Banjara Hills, Hyderabad', 'GPS Coordinates': '17.4156, 78.4350', 'GPS Timestamp': '24/09/2026 01:50 PM' }
-];
+import {
+    GUINEA_COLUMNS_449,
+    getExcelColumnLetter,
+    orderColumns
+} from './guineaSchema';
+import { SAMPLE_EXTRACTED_PDF_ROWS } from './sampleGuineaData';
+
+const DESIRED_COLUMN_ORDER = GUINEA_COLUMNS_449;
 
 interface BatchProgress {
     isActive: boolean;
@@ -52,17 +51,46 @@ interface LiveStats {
 }
 
 const NpsAnalyzer: React.FC = () => {
-    const [data, setData] = useState<any[]>([]);
-    const [columns, setColumns] = useState<string[]>([]);
-    const [visibleCols, setVisibleCols] = useState<Record<string, boolean>>({});
+    const [data, setData] = useState<any[]>(() => {
+        try {
+            const saved = sessionStorage.getItem('fe_vin_nps_data');
+            return saved ? JSON.parse(saved) : [];
+        } catch {
+            return [];
+        }
+    });
+    const [columns, setColumns] = useState<string[]>(() => {
+        try {
+            const saved = sessionStorage.getItem('fe_vin_nps_cols');
+            return saved ? JSON.parse(saved) : GUINEA_COLUMNS_449;
+        } catch {
+            return GUINEA_COLUMNS_449;
+        }
+    });
+    const [visibleCols, setVisibleCols] = useState<Record<string, boolean>>(() => {
+        try {
+            const saved = sessionStorage.getItem('fe_vin_nps_vis_cols');
+            if (saved) return JSON.parse(saved);
+        } catch {}
+        const init: Record<string, boolean> = {};
+        GUINEA_COLUMNS_449.forEach(c => { init[c] = true; });
+        return init;
+    });
     const [showColumnFilter, setShowColumnFilter] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string>('');
     const [currentPage, setCurrentPage] = useState(1);
     const [searchText, setSearchText] = useState('');
-    const [fileName, setFileName] = useState<string>('');
+    const [fileName, setFileName] = useState<string>(() => {
+        try {
+            return sessionStorage.getItem('fe_vin_nps_filename') || '';
+        } catch {
+            return '';
+        }
+    });
     const [isDragging, setIsDragging] = useState(false);
-    const [dossierMode, setDossierMode] = useState<'page' | 'dossier-4'>('page');
+    const [dossierMode, setDossierMode] = useState<'file' | 'dossier-4' | 'page'>('file');
+    const [isUploadExpanded, setIsUploadExpanded] = useState<boolean>(false);
 
     // Live Streaming Progress State
     const [progress, setProgress] = useState<BatchProgress>({
@@ -74,17 +102,100 @@ const NpsAnalyzer: React.FC = () => {
         stopped: false
     });
 
-    const [liveStats, setLiveStats] = useState<LiveStats>({
-        processed: 0,
-        promoters: 0,
-        passives: 0,
-        detractors: 0,
-        netNps: 0,
-        matchRate: 100
+    const [liveStats, setLiveStats] = useState<LiveStats>(() => {
+        try {
+            const saved = sessionStorage.getItem('fe_vin_nps_stats');
+            return saved ? JSON.parse(saved) : {
+                processed: 0,
+                promoters: 0,
+                passives: 0,
+                detractors: 0,
+                netNps: 0,
+                matchRate: 100
+            };
+        } catch {
+            return {
+                processed: 0,
+                promoters: 0,
+                passives: 0,
+                detractors: 0,
+                netNps: 0,
+                matchRate: 100
+            };
+        }
     });
 
     const fileInputRef = useRef<HTMLInputElement>(null);
     const abortControllerRef = useRef<AbortController | null>(null);
+    const tableContainerRef = useRef<HTMLDivElement>(null);
+    const topScrollRef = useRef<HTMLDivElement>(null);
+    const isSyncingScrollRef = useRef<boolean>(false);
+    const [tableScrollWidth, setTableScrollWidth] = useState<number>(100000);
+
+    const updateScrollSync = () => {
+        if (!tableContainerRef.current || isSyncingScrollRef.current) return;
+        isSyncingScrollRef.current = true;
+        const { scrollLeft, scrollWidth } = tableContainerRef.current;
+        if (topScrollRef.current) {
+            topScrollRef.current.scrollLeft = scrollLeft;
+        }
+        if (Math.abs(tableScrollWidth - scrollWidth) > 50) {
+            setTableScrollWidth(scrollWidth);
+        }
+        requestAnimationFrame(() => {
+            isSyncingScrollRef.current = false;
+        });
+    };
+
+    const handleTopScroll = () => {
+        if (!tableContainerRef.current || !topScrollRef.current || isSyncingScrollRef.current) return;
+        isSyncingScrollRef.current = true;
+        tableContainerRef.current.scrollLeft = topScrollRef.current.scrollLeft;
+        requestAnimationFrame(() => {
+            isSyncingScrollRef.current = false;
+        });
+    };
+
+    const scrollHorizontal = (amount: number) => {
+        if (tableContainerRef.current) {
+            tableContainerRef.current.scrollBy({ left: amount, behavior: 'smooth' });
+        }
+    };
+
+    useEffect(() => {
+        const updateWidth = () => {
+            if (tableContainerRef.current) {
+                const width = tableContainerRef.current.scrollWidth;
+                setTableScrollWidth(width);
+                if (topScrollRef.current) {
+                    topScrollRef.current.scrollLeft = tableContainerRef.current.scrollLeft;
+                }
+            }
+        };
+        const timer = setTimeout(updateWidth, 100);
+        return () => clearTimeout(timer);
+    }, [data, columns, visibleCols]);
+
+    // Automatically persist analyzed data to sessionStorage so switching tabs or page reloads never lose progress
+    useEffect(() => {
+        try {
+            if (data.length > 0) {
+                sessionStorage.setItem('fe_vin_nps_data', JSON.stringify(data));
+                sessionStorage.setItem('fe_vin_nps_cols', JSON.stringify(columns));
+                sessionStorage.setItem('fe_vin_nps_vis_cols', JSON.stringify(visibleCols));
+                sessionStorage.setItem('fe_vin_nps_filename', fileName);
+                sessionStorage.setItem('fe_vin_nps_stats', JSON.stringify(liveStats));
+            } else {
+                sessionStorage.removeItem('fe_vin_nps_data');
+                sessionStorage.removeItem('fe_vin_nps_cols');
+                sessionStorage.removeItem('fe_vin_nps_vis_cols');
+                sessionStorage.removeItem('fe_vin_nps_filename');
+                sessionStorage.removeItem('fe_vin_nps_stats');
+            }
+        } catch (e) {
+            console.warn('sessionStorage write error', e);
+        }
+    }, [data, columns, visibleCols, fileName, liveStats]);
 
     // Stop / Halt active analysis
     const handleStopAnalysis = () => {
@@ -107,12 +218,24 @@ const NpsAnalyzer: React.FC = () => {
             abortControllerRef.current.abort();
             abortControllerRef.current = null;
         }
+        try {
+            sessionStorage.removeItem('fe_vin_nps_data');
+            sessionStorage.removeItem('fe_vin_nps_cols');
+            sessionStorage.removeItem('fe_vin_nps_vis_cols');
+            sessionStorage.removeItem('fe_vin_nps_filename');
+            sessionStorage.removeItem('fe_vin_nps_stats');
+        } catch (e) {
+            console.warn('sessionStorage remove error', e);
+        }
         setData([]);
-        setColumns([]);
-        setVisibleCols({});
+        setColumns(GUINEA_COLUMNS_449);
+        const initVis: Record<string, boolean> = {};
+        GUINEA_COLUMNS_449.forEach(c => { initVis[c] = true; });
+        setVisibleCols(initVis);
         setIsLoading(false);
         setError('');
         setFileName('');
+        setIsUploadExpanded(false);
         setProgress({
             isActive: false,
             current: 0,
@@ -246,10 +369,9 @@ const NpsAnalyzer: React.FC = () => {
                             setData(prev => {
                                 const updated = [...prev, newRow];
                                 if (!initializedCols && newRow) {
-                                    const cols = Object.keys(newRow).filter(c => c !== '#');
-                                    setColumns(cols);
+                                    setColumns(GUINEA_COLUMNS_449);
                                     const colVisInit: Record<string, boolean> = {};
-                                    cols.forEach(c => { colVisInit[c] = true; });
+                                    GUINEA_COLUMNS_449.forEach(c => { colVisInit[c] = true; });
                                     setVisibleCols(colVisInit);
                                     initializedCols = true;
                                 }
@@ -278,12 +400,10 @@ const NpsAnalyzer: React.FC = () => {
                                 label: `Completed! Successfully extracted all ${payload.processed} records.`,
                                 stopped: false
                             }));
-                            if (payload.columns && payload.columns.length > 0) {
-                                setColumns(payload.columns);
-                                const colVisInit: Record<string, boolean> = {};
-                                payload.columns.forEach((c: string) => { colVisInit[c] = true; });
-                                setVisibleCols(colVisInit);
-                            }
+                            setColumns(GUINEA_COLUMNS_449);
+                            const colVisInit: Record<string, boolean> = {};
+                            GUINEA_COLUMNS_449.forEach((c: string) => { colVisInit[c] = true; });
+                            setVisibleCols(colVisInit);
                             if (payload.stats) {
                                 setLiveStats(payload.stats);
                             }
@@ -319,13 +439,12 @@ const NpsAnalyzer: React.FC = () => {
         setIsLoading(true);
         setError('');
         setTimeout(() => {
-            const cols = Object.keys(SAMPLE_EXTRACTED_PDF_ROWS[0]).filter(c => c !== '#');
-            setColumns(cols);
+            setColumns(GUINEA_COLUMNS_449);
             setData(SAMPLE_EXTRACTED_PDF_ROWS);
             const colVisInit: Record<string, boolean> = {};
-            cols.forEach(c => { colVisInit[c] = true; });
+            GUINEA_COLUMNS_449.forEach(c => { colVisInit[c] = true; });
             setVisibleCols(colVisInit);
-            setFileName('Sample_Automotive_NPS_Report.pdf');
+            setFileName('GUINEA_RAW_DATA.xlsx');
             setIsLoading(false);
             setCurrentPage(1);
             setLiveStats({
@@ -361,10 +480,9 @@ const NpsAnalyzer: React.FC = () => {
         const brands = ['Hero', 'TVS', 'Tata', 'Honda', 'Bajaj'];
         const locations = ['Colombo', 'Pune', 'Mumbai', 'Delhi', 'Bangalore', 'Chennai', 'Hyderabad', 'Kandy'];
 
-        const baseCols = Object.keys(SAMPLE_EXTRACTED_PDF_ROWS[0]).filter(c => c !== '#');
-        setColumns(baseCols);
+        setColumns(GUINEA_COLUMNS_449);
         const colVisInit: Record<string, boolean> = {};
-        baseCols.forEach(c => { colVisInit[c] = true; });
+        GUINEA_COLUMNS_449.forEach(c => { colVisInit[c] = true; });
         setVisibleCols(colVisInit);
 
         setProgress({
@@ -381,6 +499,12 @@ const NpsAnalyzer: React.FC = () => {
         let passCount = 0;
         let dCount = 0;
 
+        const surveyLocations = ['Conakry', 'Sangaredi', 'Kankan', 'Kindia', 'Boké'];
+        const surveyors = ['Moussa', 'Tènè Diarra'];
+        const vehicleModels = ['TVS HLX 125', 'Bajaj CT 125', 'TVS Star HLX', 'Yamaha Crux'];
+        const userNames = ['Oury diallo', 'Ousmane sangare', 'Djiré Sy', 'Baba Yara', 'Badjan diabate', 'Badrissa toukara', 'Jean paul doucoure', 'Samba si', 'Bouba Sow'];
+        const professions = ['Driver', 'Business', 'Teacher', 'Mechanician', 'Doctor', 'Trader'];
+
         const interval = setInterval(() => {
             currentIdx++;
             const score = currentIdx % 5 === 0 ? 4 : currentIdx % 4 === 0 ? 8 : currentIdx % 3 === 0 ? 9 : 10;
@@ -389,33 +513,42 @@ const NpsAnalyzer: React.FC = () => {
             else if (sentiment === 'Passive') passCount++;
             else dCount++;
 
-            const brand = brands[currentIdx % brands.length];
-            const model = models[currentIdx % models.length];
-            const loc = locations[currentIdx % locations.length];
+            const model = vehicleModels[currentIdx % vehicleModels.length];
+            const loc = surveyLocations[currentIdx % surveyLocations.length];
+            const surveyor = surveyors[currentIdx % surveyors.length];
+            const uName = userNames[currentIdx % userNames.length];
+            const prof = professions[currentIdx % professions.length];
+            const isMatch = currentIdx % 15 !== 0;
 
             const simRow = {
                 '#': currentIdx,
-                'Document Source': `Batch_Doc_${String(currentIdx).padStart(3, '0')}.pdf (Page ${currentIdx})`,
-                'Customer Name': `Customer ${currentIdx} (${['Silva', 'Sharma', 'Perera', 'Patel', 'Reddy', 'Singh'][currentIdx % 6]})`,
-                'Mobile': `07${String(10000000 + currentIdx * 3829).substring(0, 8)}`,
-                'Location': loc,
-                'Date': `2026-10-${String((currentIdx % 28) + 1).padStart(2, '0')}`,
-                'Brand': brand,
-                'Vehicle Model': model,
-                'Form VIN': `MD6${String(currentIdx * 92837).padEnd(14, '0')}`,
-                'Stamped Metal VIN': currentIdx % 15 === 0 ? `MD6DIFFERENT${currentIdx}` : `MD6${String(currentIdx * 92837).padEnd(14, '0')}`,
-                'VIN Match Status': currentIdx % 15 === 0 ? '❌ Mismatch' : '✅ Match',
-                'Odometer Reading': `${(10000 + currentIdx * 750) % 65000} km`,
-                'Dealer / Workshop': `${loc} Service Center`,
-                'Product NPS Score': score,
-                'Product Sentiment': sentiment,
-                'Product Feedback': sentiment === 'Promoter' ? 'Smooth engine, exceptional handling, and stylish look.' : sentiment === 'Passive' ? 'Decent mileage, spare parts took a week to arrive.' : 'Front suspension noise on rough roads, needs tightening.',
-                'Service NPS Score': score,
-                'Service Sentiment': sentiment,
-                'Service Feedback': sentiment === 'Promoter' ? 'Fast turnaround, friendly washing staff.' : 'Delay in billing counter queue.',
-                'GPS Watermark Location': `${loc}, Western Province`,
-                'GPS Coordinates': `6.${930000 + currentIdx * 100}, 79.${850000 + currentIdx * 100}`,
-                'GPS Timestamp': `2026-10-07 10:${String(currentIdx % 60).padStart(2, '0')} AM`
+                'Timestamp': `19-08-2026 19:${String(currentIdx % 60).padStart(2, '0')}`,
+                'SURVEY DATE': `19-Aug-26`,
+                'SURVEYOR NAME': surveyor,
+                'SURVEY LOCATION': loc,
+                'BRAND & MODEL (Qualifying Question)': model,
+                'VIN No. (Qualifying Question)': `MD625AF48S1A${String(30000 + currentIdx)}`,
+                'VIN Match Status': isMatch ? '✅ Match' : '❌ Mismatch',
+                'Please take a picture of the VIN no. and upload it here. (Qualifying Question)': `https://drive.google.com/open?id=1SampleDriveFile${currentIdx}`,
+                'ODOMETER READING (Kms)': `${(12000 + currentIdx * 820) % 75000}`,
+                'MODE OF PURCHASE': currentIdx % 3 === 0 ? 'Secondhand' : 'New',
+                'DATE OF PURCHASING THE VEHICLE FROM DEALER / PREVIOUS OWNER': '29-Mar-26',
+                'USER NAME': `${uName} #${currentIdx}`,
+                'USER AGE (YEARS) (enter only a full number between 18 to 60)': 20 + (currentIdx % 25),
+                'USER AGE GROUP': currentIdx % 2 === 0 ? '20-30' : '30-40',
+                'USER PROFESSION': prof,
+                'MOBILE NUMBER': `6${String(20000000 + currentIdx * 4921).substring(0, 8)}`,
+                'ALTERNATE MOBILE NUMBER': '—',
+                'OWNERSHIP (OWN / HIRED)': currentIdx % 4 === 0 ? 'Rented' : 'Own',
+                'FOR WHAT PURPOSE DO YOU USE THE VEHICLE?': currentIdx % 2 === 0 ? 'Passenger taxi' : 'Personal use',
+                'MODEL YEAR OF YOUR VEHICLE': 2025,
+                'HOW LONG HAVE YOU BEEN USING THIS VEHICLE?': '3-6 months ( from Feb - 2026 to Apr - 2026)',
+                'PREVIOUS VEHICLE USED Brand & Model': currentIdx % 2 === 0 ? 'Jakarta' : 'Yamaha',
+                'HOW LONG DID YOU USE THE PREVIOUS VEHICLE? (Years)': 2,
+                '1. Will you recommend your vehicle to your friends / relatives / family members?': score >= 7 ? 'Yes' : 'No',
+                '2. Likely to recommend vehicle (0-10)': score,
+                'GPS Watermark Location': `${loc}, Guinea`,
+                'GPS Coordinates': `9.6412, -13.5784`
             };
 
             setData(prev => [...prev, simRow]);
@@ -464,75 +597,37 @@ const NpsAnalyzer: React.FC = () => {
             )
         );
 
+        const activeOrderedCols = orderColumns(columns).filter(c => visibleCols[c] !== false);
+
         const exportData = filtered.map(row => {
             const exp: any = {};
-            columns.forEach(c => {
-                if (visibleCols[c]) {
-                    exp[c] = row[c];
-                }
+            activeOrderedCols.forEach(c => {
+                exp[c] = row[c] !== undefined ? row[c] : '';
             });
             return exp;
         });
 
-        const ws = XLSX.utils.json_to_sheet(exportData);
+        const ws = XLSX.utils.json_to_sheet(exportData, { header: activeOrderedCols });
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'NPS Matrix');
-        const cleanName = fileName ? fileName.replace(/\.[^/.]+$/, '') : 'NPS_Data';
-        XLSX.writeFile(wb, `${cleanName}_Export.xlsx`);
+        XLSX.utils.book_append_sheet(wb, ws, 'RAW DATA');
+        const cleanName = fileName ? fileName.replace(/\.[^/.]+$/, '') : 'Data';
+        XLSX.writeFile(wb, `RAW_DATA_${cleanName}.xlsx`);
     };
 
-    // Download Sample Excel Template for NPS Analysis Matrix
+    // Download Sample Excel Template with full 449-column schema (RAW DATA)
     const handleDownloadTemplate = () => {
-        const templateData = [
-            {
-                "Customer Name": "Ramesh Kumar",
-                "Mobile": "0772161819",
-                "Location": "Colombo",
-                "Date": "01/10/2026",
-                "Brand": "Hero",
-                "Vehicle Model": "Xtreme 160R",
-                "Form VIN": "MBLJAU021TG805557",
-                "Stamped Metal VIN": "MBLJAU021TG805557",
-                "VIN Match Status": "✅ Match",
-                "Odometer Reading": "49,000",
-                "Dealer / Workshop": "Union Place",
-                "Product NPS Score": 10,
-                "Product Sentiment": "Promoter",
-                "Product Feedback": "Best Look, Best Mileage",
-                "Service NPS Score": 10,
-                "Service Sentiment": "Promoter",
-                "Service Feedback": "Best Service, Good Staffs",
-                "GPS Watermark Location": "Sameera's Lane, Colombo, Western Province, Sri Lanka",
-                "GPS Coordinates": "6.939443, 79.851817",
-                "GPS Timestamp": "Thursday, 01/10/2026 10:28 AM GMT+05:30"
-            },
-            {
-                "Customer Name": "Sanelpana Perera",
-                "Mobile": "0717201142",
-                "Location": "Colombo",
-                "Date": "01.10.2026",
-                "Brand": "TVS",
-                "Vehicle Model": "Raider 125",
-                "Form VIN": "MD625AF91TIAF7903",
-                "Stamped Metal VIN": "MD625AF91TIAF7903",
-                "VIN Match Status": "✅ Match",
-                "Odometer Reading": "24,210",
-                "Dealer / Workshop": "Ragama",
-                "Product NPS Score": 8,
-                "Product Sentiment": "Passive",
-                "Product Feedback": "Need More Features; Parts Price High",
-                "Service NPS Score": 5,
-                "Service Sentiment": "Detractor",
-                "Service Feedback": "Bad oiling, Bad Staff",
-                "GPS Watermark Location": "Colombo, Western Province, Sri Lanka",
-                "GPS Coordinates": "6.939356, 79.852095",
-                "GPS Timestamp": "01/10/2026 10:27 AM"
-            }
-        ];
-        const ws = XLSX.utils.json_to_sheet(templateData);
+        const templateRow: Record<string, any> = {};
+        GUINEA_COLUMNS_449.forEach(col => {
+            templateRow[col] = '';
+        });
+        if (SAMPLE_EXTRACTED_PDF_ROWS && SAMPLE_EXTRACTED_PDF_ROWS[0]) {
+            const { '#': _, ...sampleVals } = SAMPLE_EXTRACTED_PDF_ROWS[0];
+            Object.assign(templateRow, sampleVals);
+        }
+        const ws = XLSX.utils.json_to_sheet([templateRow], { header: GUINEA_COLUMNS_449 });
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "NPS_Matrix");
-        XLSX.writeFile(wb, "NPS_Analysis_Matrix_Template.xlsx");
+        XLSX.utils.book_append_sheet(wb, ws, "RAW DATA");
+        XLSX.writeFile(wb, "GUINEA_RAW_DATA_TEMPLATE.xlsx");
     };
 
     // Filtered Rows based on search
@@ -547,123 +642,274 @@ const NpsAnalyzer: React.FC = () => {
     const totalPages = Math.ceil(filteredData.length / pageSize) || 1;
 
     return (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-            {/* Upload Dropzone Card */}
-            <div
-                className="glass-panel"
-                onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-                onDragLeave={() => setIsDragging(false)}
-                onDrop={(e) => {
-                    e.preventDefault();
-                    setIsDragging(false);
-                    const files = e.dataTransfer.files;
+        <div style={{ display: 'flex', flexDirection: 'column', gap: data.length > 0 ? '12px' : '20px', width: '100%' }}>
+            {/* Always mounted hidden file input for 100% reliable click triggering */}
+            <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept=".pdf,.zip"
+                onChange={(e) => {
+                    const files = e.target.files;
                     if (files && files.length > 0) processFiles(files);
+                    (e.target as HTMLInputElement).value = '';
                 }}
-                style={{
-                    padding: '28px 32px',
-                    border: isDragging ? '2px dashed #2563eb' : '2px dashed rgba(59, 130, 246, 0.4)',
-                    background: isDragging
-                        ? 'rgba(239, 246, 255, 0.9)'
-                        : 'linear-gradient(135deg, rgba(255, 255, 255, 0.96) 0%, rgba(255, 255, 255, 0.85) 100%)',
-                    transition: 'all 0.25s ease'
-                }}
-            >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '20px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '18px' }}>
-                        <div className="dropzone-icon-box" style={{ width: '56px', height: '56px', borderRadius: '16px' }}>
-                            <UploadCloud size={28} />
+                style={{ display: 'none' }}
+            />
+
+            {/* Main AI Data Entry: Compact Header when data is loaded, Full Dropzone when empty or expanded */}
+            {data.length > 0 && !isUploadExpanded ? (
+                <div
+                    className="glass-panel animate-fade-in"
+                    style={{
+                        padding: '10px 18px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        flexWrap: 'wrap',
+                        gap: '12px'
+                    }}
+                >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+                        <div style={{
+                            width: '34px',
+                            height: '34px',
+                            borderRadius: '10px',
+                            background: 'linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: '#ffffff',
+                            boxShadow: '0 2px 8px rgba(37, 99, 235, 0.25)'
+                        }}>
+                            <Sparkles size={18} />
                         </div>
-                        <div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: 'var(--color-text)' }}>
-                                    Upload NPS / Survey Document(s)
-                                </h3>
-                                <span className="modern-badge modern-badge-success" style={{ fontSize: '11px', padding: '2px 8px' }}>
-                                    Batch 1-by-1 AI Parser
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: '14px', fontWeight: 800, color: 'var(--color-text)' }}>
+                                AI Data Entry & Document Parser
+                            </span>
+                            <span className="modern-badge modern-badge-success" style={{ fontSize: '10.5px', padding: '1px 6px' }}>
+                                AI OCR v2.4
+                            </span>
+                            {fileName && (
+                                <span style={{
+                                    fontSize: '12px',
+                                    fontWeight: 600,
+                                    color: '#2563eb',
+                                    background: '#eff6ff',
+                                    border: '1px solid #bfdbfe',
+                                    padding: '2px 8px',
+                                    borderRadius: '6px',
+                                    maxWidth: '320px',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap'
+                                }} title={fileName}>
+                                    📄 {fileName}
                                 </span>
-                                <span className="modern-badge" style={{ background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', fontSize: '11px' }}>
-                                    Handles 100+ PDFs under Single File
-                                </span>
-                            </div>
-                            <p style={{ color: 'var(--color-text-muted)', fontSize: '13.5px', margin: '4px 0 0 0' }}>
-                                Drop a single PDF with 100+ pages, multiple selected PDFs, or a ZIP archive. Analyzed <strong>one by one</strong> in real-time.
-                            </p>
+                            )}
+                            <span className="mode-pill-btn active" style={{ padding: '3px 10px', fontSize: '11px', cursor: 'default' }}>
+                                {dossierMode === 'file' ? '📁 1 Record / File' : dossierMode === 'dossier-4' ? '📑 4 Pages / Dossier' : '📄 1 Record / Page'}
+                            </span>
                         </div>
                     </div>
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-                        {/* Dossier Mode Selector */}
-                        <div className="mode-pill-group" title="Select extraction partitioning strategy">
-                            <button
-                                type="button"
-                                className={`mode-pill-btn ${dossierMode === 'page' ? 'active' : ''}`}
-                                onClick={() => setDossierMode('page')}
-                            >
-                                1 Record / Page (100+ Surveys)
-                            </button>
-                            <button
-                                type="button"
-                                className={`mode-pill-btn ${dossierMode === 'dossier-4' ? 'active' : ''}`}
-                                onClick={() => setDossierMode('dossier-4')}
-                            >
-                                4 Pages / Dossier
-                            </button>
-                        </div>
-
-                        {/* File Browse Button */}
-                        <label className="modern-btn modern-btn-primary" style={{ cursor: 'pointer', margin: 0, padding: '11px 20px', fontSize: '13.5px' }}>
-                            <UploadCloud size={17} />
-                            Browse PDF / ZIP File(s)
-                            <input
-                                ref={fileInputRef}
-                                type="file"
-                                multiple
-                                accept=".pdf,.zip"
-                                onChange={(e) => {
-                                    const files = e.target.files;
-                                    if (files && files.length > 0) processFiles(files);
-                                    (e.target as HTMLInputElement).value = '';
-                                }}
-                                style={{ display: 'none' }}
-                            />
-                        </label>
-
-                        {/* Download Template */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <button
+                            className="modern-btn modern-btn-primary"
+                            onClick={() => fileInputRef.current?.click()}
+                            style={{ padding: '6px 14px', fontSize: '12px' }}
+                            title="Upload new PDF or ZIP documents"
+                        >
+                            <UploadCloud size={14} /> + Upload Files
+                        </button>
                         <button
                             className="modern-btn modern-btn-outline"
                             onClick={handleDownloadTemplate}
-                            title="Download sample Excel template for NPS Analysis matrix"
+                            style={{ padding: '6px 12px', fontSize: '12px' }}
+                            title="Download standard 449-column template"
                         >
-                            <Download size={14} /> Template
+                            <Download size={13} /> Template
                         </button>
-
-                        {/* Load Sample Data (10 Records) */}
-                        <button
-                            className="modern-btn modern-btn-secondary"
-                            onClick={handleLoadSample}
-                            title="Load pre-extracted 10 sample survey records"
-                        >
-                            <Sparkles size={14} color="#8b5cf6" /> 10 Samples
-                        </button>
-
-                        {/* Simulate 100 Records One-By-One */}
                         <button
                             className="modern-btn modern-btn-outline"
-                            onClick={handleSimulate100Records}
-                            disabled={isLoading}
-                            title="Simulate live 1-by-1 analysis of 100 survey records"
-                            style={{ borderColor: '#6366f1', color: '#4f46e5' }}
+                            onClick={() => setIsUploadExpanded(true)}
+                            style={{ padding: '6px 12px', fontSize: '12px', color: '#475569' }}
+                            title="Expand full upload dropzone and layout selector"
                         >
-                            <Layers size={14} /> 100 Records Demo
+                            <ChevronDown size={14} /> Upload Area
                         </button>
                     </div>
                 </div>
-            </div>
+            ) : (
+                /* Full Dropzone card (when empty OR user clicked to expand) */
+                <div
+                    className="glass-panel"
+                    style={{
+                        padding: '20px 24px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '16px'
+                    }}
+                >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '14px', borderBottom: '1px solid rgba(226, 232, 240, 0.8)', paddingBottom: '14px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                            <div style={{
+                                width: '40px',
+                                height: '40px',
+                                borderRadius: '12px',
+                                background: 'linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                color: '#ffffff',
+                                boxShadow: '0 4px 12px rgba(37, 99, 235, 0.25)'
+                            }}>
+                                <Sparkles size={20} />
+                            </div>
+                            <div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                    <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 800, color: 'var(--color-text)' }}>
+                                        AI Data Entry & Document Parser
+                                    </h3>
+                                    <span className="modern-badge modern-badge-success" style={{ fontSize: '11px', padding: '2px 8px' }}>
+                                        AI OCR v2.4
+                                    </span>
+                                </div>
+                                <p style={{ color: 'var(--color-text-muted)', fontSize: '12.5px', margin: '2px 0 0 0' }}>
+                                    Autonomous extraction for multi-page surveys, customer feedback forms, and vehicle dossiers.
+                                </p>
+                            </div>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                            <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--color-text-muted)' }}>
+                                Document Layout:
+                            </span>
+                            <div className="mode-pill-group">
+                                <button
+                                    type="button"
+                                    className={`mode-pill-btn ${dossierMode === 'file' ? 'active' : ''}`}
+                                    onClick={() => setDossierMode('file')}
+                                >
+                                    📁 1 Record / PDF File (Default)
+                                </button>
+                                <button
+                                    type="button"
+                                    className={`mode-pill-btn ${dossierMode === 'dossier-4' ? 'active' : ''}`}
+                                    onClick={() => setDossierMode('dossier-4')}
+                                >
+                                    📑 4 Pages / Dossier
+                                </button>
+                                <button
+                                    type="button"
+                                    className={`mode-pill-btn ${dossierMode === 'page' ? 'active' : ''}`}
+                                    onClick={() => setDossierMode('page')}
+                                >
+                                    📄 1 Record / Page
+                                </button>
+                            </div>
+
+                            {data.length > 0 && (
+                                <button
+                                    className="modern-btn modern-btn-outline"
+                                    onClick={() => setIsUploadExpanded(false)}
+                                    style={{ padding: '6px 12px', fontSize: '12px' }}
+                                    title="Collapse upload dropzone"
+                                >
+                                    <ChevronUp size={14} /> Collapse
+                                </button>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Interactive Drop Area */}
+                    <div
+                        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+                        onDragLeave={() => setIsDragging(false)}
+                        onDrop={(e) => {
+                            e.preventDefault();
+                            setIsDragging(false);
+                            const files = e.dataTransfer.files;
+                            if (files && files.length > 0) processFiles(files);
+                        }}
+                        style={{
+                            padding: '24px 20px',
+                            borderRadius: '14px',
+                            border: isDragging ? '2px dashed #2563eb' : '2px dashed rgba(59, 130, 246, 0.35)',
+                            background: isDragging
+                                ? 'rgba(239, 246, 255, 0.95)'
+                                : 'linear-gradient(180deg, rgba(248, 250, 252, 0.8) 0%, rgba(241, 245, 249, 0.5) 100%)',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            textAlign: 'center',
+                            gap: '10px',
+                            cursor: 'default'
+                        }}
+                    >
+                        <div className="dropzone-icon-box" style={{ width: '44px', height: '44px', borderRadius: '12px' }}>
+                            <UploadCloud size={22} />
+                        </div>
+
+                        <div>
+                            <div style={{ fontSize: '14.5px', fontWeight: 700, color: 'var(--color-text)' }}>
+                                Drag & drop your PDF or ZIP files here, or click to browse
+                            </div>
+                            <div style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginTop: '2px' }}>
+                                Handles multi-page master PDFs, individual scans, or ZIP archives
+                            </div>
+                        </div>
+
+                        <button
+                            type="button"
+                            className="modern-btn modern-btn-primary"
+                            onClick={() => fileInputRef.current?.click()}
+                            style={{ cursor: 'pointer', margin: '2px 0 0 0', padding: '9px 20px', fontSize: '13px', borderRadius: '8px' }}
+                        >
+                            <UploadCloud size={16} />
+                            Browse PDF / ZIP File(s)
+                        </button>
+                    </div>
+
+                    {/* Quick Action Bar */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '10px' }}>
+                        <span style={{ fontSize: '12px', color: 'var(--color-text-dim)' }}>
+                            Quick demo & template options:
+                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            <button
+                                className="modern-btn modern-btn-outline"
+                                onClick={handleDownloadTemplate}
+                                style={{ padding: '6px 12px', fontSize: '12px' }}
+                            >
+                                <Download size={13} /> Download Template
+                            </button>
+                            <button
+                                className="modern-btn modern-btn-secondary"
+                                onClick={handleLoadSample}
+                                style={{ padding: '6px 12px', fontSize: '12px' }}
+                            >
+                                <Sparkles size={13} color="#8b5cf6" /> Load 10 Samples
+                            </button>
+                            <button
+                                className="modern-btn modern-btn-outline"
+                                onClick={handleSimulate100Records}
+                                disabled={isLoading}
+                                style={{ borderColor: '#6366f1', color: '#4f46e5', padding: '6px 12px', fontSize: '12px' }}
+                            >
+                                <Layers size={13} /> 100 Records Demo
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Error Banner */}
             {error && (
                 <div className="glass-panel" style={{
-                    padding: '16px 20px',
+                    padding: '14px 18px',
                     background: 'rgba(254, 242, 242, 0.9)',
                     borderColor: 'rgba(254, 202, 202, 0.95)',
                     color: 'var(--color-danger)',
@@ -671,49 +917,75 @@ const NpsAnalyzer: React.FC = () => {
                     alignItems: 'center',
                     gap: '12px'
                 }}>
-                    <AlertTriangle size={24} color="#dc2626" />
+                    <AlertTriangle size={22} color="#dc2626" />
                     <div>
-                        <h4 style={{ margin: '0 0 2px 0', fontSize: '14px', fontWeight: 700 }}>Analysis Alert</h4>
-                        <p style={{ margin: 0, fontSize: '13px' }}>{error}</p>
+                        <h4 style={{ margin: '0 0 2px 0', fontSize: '13.5px', fontWeight: 700 }}>Analysis Alert</h4>
+                        <p style={{ margin: 0, fontSize: '12.5px' }}>{error}</p>
                     </div>
                 </div>
             )}
 
-            {/* Real-time Batch Progress Dashboard */}
+            {/* Real-time Batch Progress Dashboard - Compact Single-Line Bar */}
             {(progress.isActive || data.length > 0 || progress.stopped) && (
-                <div className="batch-progress-card animate-fade-in">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '14px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div className="batch-progress-card animate-fade-in" style={{ padding: '12px 18px', gap: '10px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                             {progress.isActive ? (
                                 <span className="pulse-dot" />
                             ) : progress.stopped ? (
                                 <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#eab308' }} />
                             ) : (
-                                <CheckCircle2 size={18} color="#059669" />
+                                <CheckCircle2 size={17} color="#059669" />
                             )}
                             <div>
-                                <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: 'var(--color-text)' }}>
+                                <span style={{ fontSize: '13.5px', fontWeight: 700, color: 'var(--color-text)' }}>
                                     {progress.isActive
                                         ? `Analyzing Batch Records: ${progress.current} of ${progress.total || '...'}`
                                         : progress.stopped
                                         ? `Analysis Paused: ${data.length} records preserved`
-                                        : `Batch Complete: ${data.length} records extracted`}
-                                </h4>
-                                <p style={{ margin: '2px 0 0 0', fontSize: '12.5px', color: 'var(--color-text-muted)' }}>
-                                    {progress.label || `Extracted from ${fileName}`}
-                                </p>
+                                        : `Batch Complete: ${data.length} record${data.length === 1 ? '' : 's'} extracted`}
+                                </span>
+                                {progress.label && (
+                                    <span style={{ fontSize: '12px', color: 'var(--color-text-muted)', marginLeft: '8px' }}>
+                                        ({progress.label})
+                                    </span>
+                                )}
                             </div>
                         </div>
 
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            {/* Inline Compact KPIs */}
+                            {data.length > 0 && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                    <span style={{ fontSize: '11.5px', fontWeight: 700, background: '#f1f5f9', color: '#334155', padding: '3px 8px', borderRadius: '6px', border: '1px solid #cbd5e1' }}>
+                                        Total: <strong style={{ color: '#0f172a' }}>{data.length}</strong>
+                                    </span>
+                                    <span style={{ fontSize: '11.5px', fontWeight: 700, background: '#f0fdf4', color: '#15803d', padding: '3px 8px', borderRadius: '6px', border: '1px solid #86efac' }}>
+                                        Positive (9-10): <strong>{liveStats.promoters}</strong> ({data.length > 0 ? Math.round((liveStats.promoters / data.length) * 100) : 0}%)
+                                    </span>
+                                    <span style={{ fontSize: '11.5px', fontWeight: 700, background: '#fffbeb', color: '#b45309', padding: '3px 8px', borderRadius: '6px', border: '1px solid #fde68a' }}>
+                                        Neutral (7-8): <strong>{liveStats.passives}</strong>
+                                    </span>
+                                    <span style={{ fontSize: '11.5px', fontWeight: 700, background: '#fef2f2', color: '#b91c1c', padding: '3px 8px', borderRadius: '6px', border: '1px solid #fca5a5' }}>
+                                        Issues (0-6): <strong>{liveStats.detractors}</strong>
+                                    </span>
+                                    <span style={{ fontSize: '11.5px', fontWeight: 700, background: '#eff6ff', color: '#1e40af', padding: '3px 8px', borderRadius: '6px', border: '1px solid #bfdbfe' }}>
+                                        Net NPS: <strong>{liveStats.netNps > 0 ? `+${liveStats.netNps}` : liveStats.netNps}</strong>
+                                    </span>
+                                    <span style={{ fontSize: '11.5px', fontWeight: 700, background: '#ecfdf5', color: '#047857', padding: '3px 8px', borderRadius: '6px', border: '1px solid #a7f3d0' }}>
+                                        VIN Match: <strong>{liveStats.matchRate}%</strong>
+                                    </span>
+                                </div>
+                            )}
+
                             {progress.isActive && (
                                 <button
                                     className="modern-btn modern-btn-danger"
                                     onClick={handleStopAnalysis}
-                                    style={{ padding: '8px 16px', fontSize: '12.5px' }}
-                                    title="Stop analysis now and keep all gathered records"
+                                    style={{ padding: '6px 12px', fontSize: '12px' }}
+                                    title="Stop analysis now"
                                 >
-                                    <Square size={13} /> Stop / Pause
+                                    <Square size={12} /> Stop
                                 </button>
                             )}
 
@@ -722,90 +994,36 @@ const NpsAnalyzer: React.FC = () => {
                                     <button
                                         className="modern-btn modern-btn-success"
                                         onClick={handleDownloadExcel}
-                                        style={{ padding: '8px 16px', fontSize: '12.5px' }}
-                                        title="Download all processed records as clean Excel file"
+                                        style={{ padding: '6px 14px', fontSize: '12.5px', fontWeight: 700 }}
+                                        title="Download Excel spreadsheet"
                                     >
                                         <Download size={13} /> Export Excel ({data.length})
                                     </button>
-
                                     <button
                                         className="modern-btn modern-btn-outline"
                                         onClick={handleClear}
-                                        style={{ padding: '8px 14px', fontSize: '12.5px' }}
-                                        title="Clear all extracted records and start new batch"
+                                        style={{ padding: '6px 12px', fontSize: '12px' }}
+                                        title="Clear all extracted records"
                                     >
-                                        <RotateCcw size={13} /> Clear
+                                        <RotateCcw size={12} /> Clear
                                     </button>
                                 </>
                             )}
                         </div>
                     </div>
 
-                    {/* Progress Bar (Visible while active or stopped) */}
+                    {/* Progress Bar (Visible while active or paused) */}
                     {(progress.isActive || (progress.total > 0 && progress.percent < 100)) && (
                         <div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', fontWeight: 700, color: '#475569', marginBottom: '6px' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11.5px', fontWeight: 700, color: '#475569', marginBottom: '4px' }}>
                                 <span>Progress: {progress.current} / {progress.total} Document Records</span>
                                 <span>{progress.percent}%</span>
                             </div>
-                            <div className="batch-progress-bar-bg">
+                            <div className="batch-progress-bar-bg" style={{ height: '7px' }}>
                                 <div
                                     className="batch-progress-bar-fill"
                                     style={{ width: `${Math.min(100, progress.percent)}%` }}
                                 />
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Live KPI Statistics Cards */}
-                    {data.length > 0 && (
-                        <div className="batch-kpi-grid">
-                            <div className="batch-kpi-card">
-                                <span className="batch-kpi-label">Total Records</span>
-                                <span className="batch-kpi-value">{data.length}</span>
-                                <span className="batch-kpi-sub" style={{ color: '#64748b' }}>
-                                    {progress.isActive ? `of ${progress.total}` : '100% Extracted'}
-                                </span>
-                            </div>
-
-                            <div className="batch-kpi-card" style={{ borderColor: 'rgba(34, 197, 94, 0.4)' }}>
-                                <span className="batch-kpi-label" style={{ color: '#15803d' }}>Promoters (9-10)</span>
-                                <span className="batch-kpi-value" style={{ color: '#15803d' }}>{liveStats.promoters}</span>
-                                <span className="batch-kpi-sub" style={{ color: '#16a34a' }}>
-                                    {data.length > 0 ? `${Math.round((liveStats.promoters / data.length) * 100)}%` : '0%'}
-                                </span>
-                            </div>
-
-                            <div className="batch-kpi-card" style={{ borderColor: 'rgba(245, 158, 11, 0.4)' }}>
-                                <span className="batch-kpi-label" style={{ color: '#b45309' }}>Passives (7-8)</span>
-                                <span className="batch-kpi-value" style={{ color: '#b45309' }}>{liveStats.passives}</span>
-                                <span className="batch-kpi-sub" style={{ color: '#d97706' }}>
-                                    {data.length > 0 ? `${Math.round((liveStats.passives / data.length) * 100)}%` : '0%'}
-                                </span>
-                            </div>
-
-                            <div className="batch-kpi-card" style={{ borderColor: 'rgba(239, 68, 68, 0.4)' }}>
-                                <span className="batch-kpi-label" style={{ color: '#b91c1c' }}>Detractors (0-6)</span>
-                                <span className="batch-kpi-value" style={{ color: '#b91c1c' }}>{liveStats.detractors}</span>
-                                <span className="batch-kpi-sub" style={{ color: '#dc2626' }}>
-                                    {data.length > 0 ? `${Math.round((liveStats.detractors / data.length) * 100)}%` : '0%'}
-                                </span>
-                            </div>
-
-                            <div className="batch-kpi-card" style={{ background: 'linear-gradient(135deg, rgba(37,99,235,0.08) 0%, rgba(124,58,237,0.08) 100%)', borderColor: 'rgba(99, 102, 241, 0.4)' }}>
-                                <span className="batch-kpi-label" style={{ color: '#4338ca' }}>Net NPS Score</span>
-                                <span className="batch-kpi-value" style={{ color: liveStats.netNps >= 0 ? '#1e40af' : '#b91c1c' }}>
-                                    {liveStats.netNps > 0 ? `+${liveStats.netNps}` : liveStats.netNps}
-                                </span>
-                                <span className="batch-kpi-sub" style={{ color: '#4f46e5' }}>
-                                    {liveStats.netNps >= 50 ? '🌟 World Class' : liveStats.netNps >= 20 ? '👍 Strong' : '⚠️ Action Req.'}
-                                </span>
-                            </div>
-
-                            <div className="batch-kpi-card" style={{ borderColor: 'rgba(16, 185, 129, 0.4)' }}>
-                                <span className="batch-kpi-label" style={{ color: '#047857' }}>VIN Match Rate</span>
-                                <span className="batch-kpi-value" style={{ color: '#047857' }}>{liveStats.matchRate}%</span>
-                                <span className="batch-kpi-sub" style={{ color: '#059669' }}>Form vs Chassis</span>
                             </div>
                         </div>
                     )}
@@ -816,8 +1034,13 @@ const NpsAnalyzer: React.FC = () => {
             {data.length === 0 && !isLoading && (
                 <div className="feature-showcase-grid">
                     <div className="feature-card">
-                        <div className="feature-card-icon" style={{ background: 'rgba(37, 99, 235, 0.1)', color: '#2563eb' }}>
-                            <Layers size={20} />
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <div className="feature-card-icon" style={{ background: 'rgba(37, 99, 235, 0.1)', color: '#2563eb' }}>
+                                <Layers size={20} />
+                            </div>
+                            <span className="modern-badge" style={{ background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe', fontSize: '10.5px' }}>
+                                High Capacity
+                            </span>
                         </div>
                         <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#0f172a' }}>
                             100+ PDF Batch Extraction
@@ -826,84 +1049,126 @@ const NpsAnalyzer: React.FC = () => {
                             Drop a single master PDF containing 100 survey pages, a ZIP archive, or multiple selected PDFs. Analyzes each record sequentially.
                         </p>
                     </div>
+
                     <div className="feature-card">
-                        <div className="feature-card-icon" style={{ background: 'rgba(16, 185, 129, 0.1)', color: '#059669' }}>
-                            <BarChart3 size={20} />
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <div className="feature-card-icon" style={{ background: 'rgba(124, 58, 237, 0.1)', color: '#7c3aed' }}>
+                                <Sparkles size={20} />
+                            </div>
+                            <span className="modern-badge" style={{ background: '#f5f3ff', color: '#7c3aed', border: '1px solid #ddd6fe', fontSize: '10.5px' }}>
+                                Automated OCR
+                            </span>
                         </div>
                         <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#0f172a' }}>
-                            Live Real-Time Streaming
+                            Intelligent Field Recognition
                         </h4>
                         <p style={{ margin: 0, fontSize: '13px', color: '#64748b', lineHeight: 1.5 }}>
-                            Rows appear in the table immediately as each PDF is parsed. Dynamic metrics compute Promoters, Passives, and Net NPS live.
+                            Automatically parses Customer details, Form VIN, Stamped Chassis VIN, NPS Scores, sentiments, and GPS metadata.
                         </p>
                     </div>
+
                     <div className="feature-card">
-                        <div className="feature-card-icon" style={{ background: 'rgba(139, 92, 246, 0.1)', color: '#7c3aed' }}>
-                            <Download size={20} />
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                            <div className="feature-card-icon" style={{ background: 'rgba(16, 185, 129, 0.1)', color: '#059669' }}>
+                                <FileSpreadsheet size={20} />
+                            </div>
+                            <span className="modern-badge" style={{ background: '#ecfdf5', color: '#047857', border: '1px solid #a7f3d0', fontSize: '10.5px' }}>
+                                Instant XLSX
+                            </span>
                         </div>
                         <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#0f172a' }}>
-                            One-Click Clean XLSX
+                            Live Streaming & Clean Export
                         </h4>
                         <p style={{ margin: 0, fontSize: '13px', color: '#64748b', lineHeight: 1.5 }}>
-                            Pause or stop anytime, search and filter columns, and export all gathered records directly into a clean Excel spreadsheet.
+                            Rows appear live as each page is parsed. Filter columns, search records, and export a production-ready Excel spreadsheet in 1 click.
                         </p>
                     </div>
                 </div>
             )}
 
-            {/* Extracted Data Matrix Table Card (Shown whenever data is available, even while streaming!) */}
+            {/* Extracted Data Matrix Table Card - Full Width & Height, Large Easy to Identify */}
             {data.length > 0 && (
-                <div className="glass-panel" style={{ padding: 0, overflow: 'hidden' }}>
+                <div
+                    className="glass-panel"
+                    style={{
+                        padding: 0,
+                        overflow: 'hidden',
+                        width: '100%',
+                        border: '1px solid #cbd5e1',
+                        boxShadow: '0 8px 24px rgba(0, 0, 0, 0.06)'
+                    }}
+                >
                     {/* Top Action Bar */}
                     <div style={{
                         position: 'relative',
-                        zIndex: 100,
-                        padding: '18px 24px',
-                        borderBottom: '1px solid var(--color-border)',
-                        background: 'var(--color-surface-2)',
+                        zIndex: 40,
+                        padding: '12px 18px',
+                        borderBottom: '2px solid #e2e8f0',
+                        background: '#ffffff',
                         display: 'flex',
                         justifyContent: 'space-between',
                         alignItems: 'center',
                         flexWrap: 'wrap',
-                        gap: '14px'
+                        gap: '12px'
                     }}>
-                        <div>
-                            <h4 style={{ margin: 0, color: 'var(--color-text)', display: 'flex', alignItems: 'center', gap: '8px', fontSize: '15px', fontWeight: 700 }}>
-                                <FileSpreadsheet size={18} color="#2563eb" />
-                                Parsed NPS Matrix ({data.length} records)
-                                {progress.isActive && (
-                                    <span className="modern-badge modern-badge-warning" style={{ fontSize: '11px', padding: '2px 8px' }}>
-                                        Streaming Live...
-                                    </span>
-                                )}
-                            </h4>
-                            <p style={{ color: 'var(--color-text-muted)', fontSize: '13px', margin: '4px 0 0 0' }}>
-                                Source: <strong style={{ color: 'var(--color-text)' }}>{fileName}</strong> &middot; Ready to download as Excel.
-                            </p>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                            <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '7px',
+                                background: 'linear-gradient(135deg, #107c41 0%, #15803d 100%)',
+                                color: '#ffffff',
+                                padding: '5px 12px',
+                                borderRadius: '7px',
+                                fontWeight: 800,
+                                fontSize: '12.5px',
+                                boxShadow: '0 2px 6px rgba(16, 124, 65, 0.25)'
+                            }}>
+                                <FileSpreadsheet size={15} />
+                                RAW DATA MATRIX
+                            </div>
+                            <span style={{
+                                fontSize: '12px',
+                                fontWeight: 700,
+                                color: '#475569',
+                                background: '#f1f5f9',
+                                padding: '4px 10px',
+                                borderRadius: '6px',
+                                border: '1px solid #e2e8f0'
+                            }}>
+                                Columns A – QG ({columns.length} Total)
+                            </span>
+                            <span style={{ fontSize: '12.5px', color: '#64748b' }}>
+                                Showing {filteredData.length} of {data.length} record{data.length === 1 ? '' : 's'}
+                            </span>
+                            {progress.isActive && (
+                                <span className="modern-badge modern-badge-warning" style={{ fontSize: '11px', padding: '2px 8px' }}>
+                                    Streaming Live...
+                                </span>
+                            )}
                         </div>
 
-                        <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
                             {/* Search Input */}
                             <div style={{ position: 'relative' }}>
                                 <Search
-                                    size={15}
-                                    style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: 'var(--color-text-dim)' }}
+                                    size={14}
+                                    style={{ position: 'absolute', left: '11px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }}
                                 />
                                 <input
                                     type="text"
-                                    placeholder="Search all columns..."
+                                    placeholder="Search across all 449 columns..."
                                     value={searchText}
                                     onChange={e => { setSearchText(e.target.value); setCurrentPage(1); }}
                                     style={{
-                                        padding: '9px 14px 9px 36px',
-                                        border: '1px solid var(--color-border)',
-                                        borderRadius: '10px',
-                                        fontSize: '13px',
-                                        background: 'var(--color-surface)',
-                                        width: '230px',
+                                        padding: '7px 12px 7px 32px',
+                                        border: '1px solid #cbd5e1',
+                                        borderRadius: '8px',
+                                        fontSize: '12.5px',
+                                        background: '#ffffff',
+                                        width: '240px',
                                         outline: 'none',
-                                        color: 'var(--color-text)',
-                                        boxShadow: 'var(--shadow-sm)'
+                                        color: '#0f172a'
                                     }}
                                 />
                             </div>
@@ -913,8 +1178,9 @@ const NpsAnalyzer: React.FC = () => {
                                 <button
                                     className="modern-btn modern-btn-outline"
                                     onClick={() => setShowColumnFilter(!showColumnFilter)}
+                                    style={{ padding: '6px 12px', fontSize: '12px' }}
                                 >
-                                    <SlidersHorizontal size={14} /> Select Columns
+                                    <SlidersHorizontal size={13} /> Select Columns ({orderColumns(columns).filter(c => visibleCols[c] !== false).length})
                                 </button>
 
                                 {showColumnFilter && (
@@ -931,74 +1197,407 @@ const NpsAnalyzer: React.FC = () => {
                                         <h5 style={{ margin: '0 0 12px 0', fontSize: '13px', color: 'var(--color-text)', paddingBottom: '8px', borderBottom: '1px solid var(--color-border)' }}>
                                             Visible Columns
                                         </h5>
-                                        {columns.map(col => (
-                                            <div key={col} style={{ display: 'flex', alignItems: 'center', marginBottom: '8px' }}>
-                                                <input
-                                                    id={`nps-col-${col}`}
-                                                    type="checkbox"
-                                                    checked={visibleCols[col] !== false}
-                                                    onChange={() => setVisibleCols(prev => ({ ...prev, [col]: !prev[col] }))}
-                                                    style={{ marginRight: '8px', cursor: 'pointer' }}
-                                                />
-                                                <label htmlFor={`nps-col-${col}`} style={{ fontSize: '13px', color: 'var(--color-text)', cursor: 'pointer' }}>
-                                                    {col}
-                                                </label>
-                                            </div>
-                                        ))}
+                                        {columns.map((col, idx) => {
+                                            const letter = getExcelColumnLetter(col, idx);
+                                            return (
+                                                <div key={col} style={{ display: 'flex', alignItems: 'center', marginBottom: '8px', gap: '8px' }}>
+                                                    <input
+                                                        id={`nps-col-${col}`}
+                                                        type="checkbox"
+                                                        checked={visibleCols[col] !== false}
+                                                        onChange={() => setVisibleCols(prev => ({ ...prev, [col]: !prev[col] }))}
+                                                        style={{ cursor: 'pointer' }}
+                                                    />
+                                                    <label htmlFor={`nps-col-${col}`} style={{ fontSize: '12px', color: 'var(--color-text)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+                                                        <span className="excel-col-badge" style={{ fontSize: '10px', padding: '1px 5px' }}>
+                                                            {letter}
+                                                        </span>
+                                                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '200px' }} title={col}>
+                                                            {col}
+                                                        </span>
+                                                    </label>
+                                                </div>
+                                            );
+                                        })}
                                     </div>
                                 )}
+                            </div>
+
+                            {/* Side Scroll Quick Navigation Buttons */}
+                            <div style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                background: '#f8fafc',
+                                padding: '3px 8px',
+                                borderRadius: '8px',
+                                border: '1px solid #cbd5e1'
+                            }}>
+                                <span style={{ fontSize: '11.5px', fontWeight: 800, color: '#334155', marginRight: '3px' }}>
+                                    Scroll:
+                                </span>
+                                <button
+                                    type="button"
+                                    className="modern-btn"
+                                    onClick={() => { if (tableContainerRef.current) tableContainerRef.current.scrollTo({ left: 0, behavior: 'smooth' }); }}
+                                    title="Scroll to Column A (Beginning)"
+                                    style={{ padding: '4px 8px', fontSize: '11.5px', height: '28px', background: '#ffffff', border: '1px solid #cbd5e1', color: '#334155', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '3px' }}
+                                >
+                                    <ChevronsLeft size={14} /> First
+                                </button>
+                                <button
+                                    type="button"
+                                    className="modern-btn"
+                                    onClick={() => scrollHorizontal(-350)}
+                                    title="Click to Scroll Left"
+                                    style={{ padding: '4px 11px', fontSize: '12px', height: '28px', background: '#2563eb', color: '#ffffff', border: '1px solid #1d4ed8', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px', boxShadow: '0 1px 3px rgba(37,99,235,0.2)' }}
+                                >
+                                    <ChevronLeft size={16} /> Left
+                                </button>
+                                <button
+                                    type="button"
+                                    className="modern-btn"
+                                    onClick={() => scrollHorizontal(350)}
+                                    title="Click to Scroll Right"
+                                    style={{ padding: '4px 11px', fontSize: '12px', height: '28px', background: '#2563eb', color: '#ffffff', border: '1px solid #1d4ed8', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '4px', boxShadow: '0 1px 3px rgba(37,99,235,0.2)' }}
+                                >
+                                    Right <ChevronRight size={16} />
+                                </button>
+                                <button
+                                    type="button"
+                                    className="modern-btn"
+                                    onClick={() => { if (tableContainerRef.current) tableContainerRef.current.scrollTo({ left: tableContainerRef.current.scrollWidth, behavior: 'smooth' }); }}
+                                    title="Scroll to Column QG (End)"
+                                    style={{ padding: '4px 8px', fontSize: '11.5px', height: '28px', background: '#ffffff', border: '1px solid #cbd5e1', color: '#334155', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '3px' }}
+                                >
+                                    End <ChevronsRight size={14} />
+                                </button>
                             </div>
 
                             {/* Download as Excel */}
                             <button
                                 className="modern-btn modern-btn-success"
                                 onClick={handleDownloadExcel}
+                                style={{
+                                    padding: '7px 16px',
+                                    fontSize: '12.5px',
+                                    fontWeight: 700,
+                                    background: '#107c41',
+                                    boxShadow: '0 2px 6px rgba(16, 124, 65, 0.25)'
+                                }}
                             >
                                 <Download size={14} /> Download Excel (.xlsx)
                             </button>
                         </div>
                     </div>
 
-                    {/* Table View */}
-                    <div style={{
-                        overflowX: 'auto',
-                        overflowY: 'auto',
-                        maxHeight: 'calc(100vh - 420px)',
-                        width: '100%',
-                        WebkitOverflowScrolling: 'touch'
-                    }}>
-                        <table className="modern-table" style={{ width: 'max-content', minWidth: '100%', tableLayout: 'fixed' }}>
+                    {/* Top Synchronized Horizontal Scrollbar with Clickable Arrow Buttons */}
+                    <div
+                        style={{
+                            background: '#f1f5f9',
+                            borderBottom: '1px solid #cbd5e1',
+                            padding: '3px 8px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px'
+                        }}
+                    >
+                        <button
+                            type="button"
+                            onClick={() => scrollHorizontal(-350)}
+                            title="Click Left Arrow to Scroll Left"
+                            style={{
+                                background: '#ffffff',
+                                border: '1px solid #94a3b8',
+                                borderRadius: '5px',
+                                cursor: 'pointer',
+                                padding: '2px 8px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                color: '#1e293b',
+                                height: '22px',
+                                fontWeight: 700,
+                                boxShadow: '0 1px 2px rgba(0,0,0,0.08)'
+                            }}
+                            onMouseEnter={(e) => { e.currentTarget.style.background = '#dbeafe'; e.currentTarget.style.borderColor = '#3b82f6'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.background = '#ffffff'; e.currentTarget.style.borderColor = '#94a3b8'; }}
+                        >
+                            <ChevronLeft size={16} />
+                        </button>
+
+                        <div
+                            ref={topScrollRef}
+                            onScroll={handleTopScroll}
+                            className="matrix-table-container"
+                            style={{
+                                flex: 1,
+                                overflowX: 'auto',
+                                overflowY: 'hidden',
+                                height: '14px',
+                                lineHeight: 0
+                            }}
+                        >
+                            <div style={{ width: `${Math.max(tableScrollWidth, 100000)}px`, height: '1px' }} />
+                        </div>
+
+                        <button
+                            type="button"
+                            onClick={() => scrollHorizontal(350)}
+                            title="Click Right Arrow to Scroll Right"
+                            style={{
+                                background: '#ffffff',
+                                border: '1px solid #94a3b8',
+                                borderRadius: '5px',
+                                cursor: 'pointer',
+                                padding: '2px 8px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                color: '#1e293b',
+                                height: '22px',
+                                fontWeight: 700,
+                                boxShadow: '0 1px 2px rgba(0,0,0,0.08)'
+                            }}
+                            onMouseEnter={(e) => { e.currentTarget.style.background = '#dbeafe'; e.currentTarget.style.borderColor = '#3b82f6'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.background = '#ffffff'; e.currentTarget.style.borderColor = '#94a3b8'; }}
+                        >
+                            <ChevronRight size={16} />
+                        </button>
+                    </div>
+
+                    {/* Table View Container with Floating Side Arrows & Keyboard Arrow Listener */}
+                    <div style={{ position: 'relative', width: '100%' }}>
+                        {/* Floating Left Arrow Button */}
+                        <button
+                            type="button"
+                            onClick={() => scrollHorizontal(-350)}
+                            title="Click or press ← to scroll left"
+                            style={{
+                                position: 'absolute',
+                                left: '74px',
+                                top: '50%',
+                                transform: 'translateY(-50%)',
+                                zIndex: 45,
+                                width: '36px',
+                                height: '36px',
+                                borderRadius: '50%',
+                                background: 'rgba(15, 23, 42, 0.85)',
+                                color: '#ffffff',
+                                border: '2px solid rgba(255, 255, 255, 0.8)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                                boxShadow: '0 4px 14px rgba(0,0,0,0.3)',
+                                transition: 'all 0.15s ease'
+                            }}
+                            onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-50%) scale(1.12)'; e.currentTarget.style.background = '#2563eb'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(-50%) scale(1)'; e.currentTarget.style.background = 'rgba(15, 23, 42, 0.85)'; }}
+                        >
+                            <ChevronLeft size={20} />
+                        </button>
+
+                        {/* Floating Right Arrow Button */}
+                        <button
+                            type="button"
+                            onClick={() => scrollHorizontal(350)}
+                            title="Click or press → to scroll right"
+                            style={{
+                                position: 'absolute',
+                                right: '12px',
+                                top: '50%',
+                                transform: 'translateY(-50%)',
+                                zIndex: 45,
+                                width: '36px',
+                                height: '36px',
+                                borderRadius: '50%',
+                                background: 'rgba(15, 23, 42, 0.85)',
+                                color: '#ffffff',
+                                border: '2px solid rgba(255, 255, 255, 0.8)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                cursor: 'pointer',
+                                boxShadow: '0 4px 14px rgba(0,0,0,0.3)',
+                                transition: 'all 0.15s ease'
+                            }}
+                            onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-50%) scale(1.12)'; e.currentTarget.style.background = '#2563eb'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.transform = 'translateY(-50%) scale(1)'; e.currentTarget.style.background = 'rgba(15, 23, 42, 0.85)'; }}
+                        >
+                            <ChevronRight size={20} />
+                        </button>
+
+                        {/* Scrollable Matrix Table */}
+                        <div 
+                            ref={tableContainerRef}
+                            tabIndex={0}
+                            onScroll={updateScrollSync}
+                            onKeyDown={(e) => {
+                                if (e.key === 'ArrowRight') {
+                                    e.preventDefault();
+                                    scrollHorizontal(350);
+                                } else if (e.key === 'ArrowLeft') {
+                                    e.preventDefault();
+                                    scrollHorizontal(-350);
+                                }
+                            }}
+                            className="matrix-table-container"
+                            style={{
+                                overflowX: 'auto',
+                                overflowY: 'auto',
+                                maxHeight: 'calc(100vh - 350px)',
+                                minHeight: data.length <= 2 ? '140px' : '300px',
+                                width: '100%',
+                                WebkitOverflowScrolling: 'touch',
+                                background: '#ffffff',
+                                outline: 'none'
+                            }}
+                        >
+                        <table className="excel-matrix-table">
                             <thead>
-                                <tr>
-                                    <th style={{ width: '60px' }}>#</th>
-                                    {columns.map((col, idx) => (
-                                        visibleCols[col] !== false ? (
+                                <tr style={{ position: 'sticky', top: 0, zIndex: 30, minHeight: '105px' }}>
+                                    {/* Sticky row index header */}
+                                    <th style={{
+                                        position: 'sticky',
+                                        left: 0,
+                                        top: 0,
+                                        zIndex: 40,
+                                        width: '65px',
+                                        minWidth: '65px',
+                                        padding: 0,
+                                        background: '#2e1065',
+                                        color: '#f8fafc',
+                                        borderRight: '2px solid #7c3aed',
+                                        borderBottom: '2px solid #4c1d95',
+                                        boxShadow: '3px 0 6px rgba(0, 0, 0, 0.15)',
+                                        boxSizing: 'border-box',
+                                        verticalAlign: 'top'
+                                    }}>
+                                        {/* Excel corner block */}
+                                        <div style={{
+                                            background: '#cbd5e1',
+                                            color: '#475569',
+                                            textAlign: 'center',
+                                            padding: '5px 0',
+                                            fontSize: '11px',
+                                            fontWeight: 800,
+                                            borderBottom: '1px solid #94a3b8',
+                                            height: '28px',
+                                            boxSizing: 'border-box',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center'
+                                        }}>
+                                            ◢
+                                        </div>
+                                        <div style={{
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            color: '#f8fafc',
+                                            fontSize: '13px',
+                                            fontWeight: 800,
+                                            minHeight: '75px',
+                                            boxSizing: 'border-box'
+                                        }}>
+                                            #
+                                        </div>
+                                    </th>
+                                    {columns.map((col, idx) => {
+                                        if (visibleCols[col] === false) return null;
+                                        const letter = getExcelColumnLetter(col, idx);
+                                        return (
                                             <th
                                                 key={idx}
                                                 style={{
-                                                    minWidth: col.toLowerCase().includes('feedback') ? '300px' : col.toLowerCase().includes('source') ? '220px' : '160px',
-                                                    maxWidth: col.toLowerCase().includes('feedback') ? '400px' : '260px'
+                                                    position: 'sticky',
+                                                    top: 0,
+                                                    zIndex: 30,
+                                                    background: '#2e1065',
+                                                    borderRight: '1px solid rgba(255, 255, 255, 0.25)',
+                                                    borderBottom: '2px solid #4c1d95',
+                                                    padding: 0,
+                                                    minWidth: col.length > 50 ? '300px' : col.length > 25 ? '240px' : '200px',
+                                                    maxWidth: '380px',
+                                                    verticalAlign: 'top',
+                                                    userSelect: 'none',
+                                                    boxSizing: 'border-box'
                                                 }}
                                             >
-                                                {col}
+                                                {/* Big Excel Alphabet Letter Bar (Above Question) */}
+                                                <div style={{
+                                                    background: '#e2e8f0',
+                                                    color: '#0f172a',
+                                                    textAlign: 'center',
+                                                    padding: '5px 0',
+                                                    fontSize: '14px',
+                                                    fontWeight: 800,
+                                                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                                                    borderBottom: '1px solid #cbd5e1',
+                                                    letterSpacing: '0.08em',
+                                                    height: '28px',
+                                                    boxSizing: 'border-box',
+                                                    display: 'flex',
+                                                    alignItems: 'center',
+                                                    justifyContent: 'center',
+                                                    boxShadow: 'inset 0 -1px 0 rgba(0,0,0,0.05)'
+                                                }}>
+                                                    {letter}
+                                                </div>
+
+                                                {/* Question Content Below */}
+                                                <div 
+                                                    title={col}
+                                                    style={{
+                                                        padding: '10px 14px',
+                                                        color: '#ffffff',
+                                                        fontSize: '12.5px',
+                                                        fontWeight: 700,
+                                                        lineHeight: 1.35,
+                                                        whiteSpace: 'normal',
+                                                        wordBreak: 'break-word',
+                                                        overflowWrap: 'break-word',
+                                                        minHeight: '75px',
+                                                        boxSizing: 'border-box'
+                                                    }}
+                                                >
+                                                    {col}
+                                                </div>
                                             </th>
-                                        ) : null
-                                    ))}
+                                        );
+                                    })}
                                 </tr>
                             </thead>
                             <tbody>
                                 {paginatedData.length === 0 ? (
                                     <tr>
-                                        <td colSpan={columns.length + 1} style={{ textAlign: 'center', padding: '36px', color: 'var(--color-text-muted)' }}>
+                                        <td colSpan={columns.length + 1} style={{ textAlign: 'center', padding: '48px', color: '#64748b', fontSize: '14px' }}>
                                             No records match your search filter.
                                         </td>
                                     </tr>
                                 ) : (
                                     paginatedData.map((row, i) => {
                                         const globalIdx = (currentPage - 1) * pageSize + i + 1;
+                                        const isEven = i % 2 === 0;
                                         return (
-                                            <tr key={i}>
-                                                <td style={{ color: 'var(--color-text-muted)', fontWeight: 600 }}>
+                                            <tr key={i} style={{ background: isEven ? '#ffffff' : '#f8fafc' }} className="excel-matrix-row">
+                                                {/* Sticky left Row Index column */}
+                                                <td style={{
+                                                    position: 'sticky',
+                                                    left: 0,
+                                                    zIndex: 20,
+                                                    background: isEven ? '#f1f5f9' : '#e2e8f0',
+                                                    color: '#334155',
+                                                    fontWeight: 800,
+                                                    fontSize: '12.5px',
+                                                    textAlign: 'center',
+                                                    padding: '9px 8px',
+                                                    borderRight: '2px solid #cbd5e1',
+                                                    borderBottom: '1px solid #cbd5e1',
+                                                    boxShadow: '3px 0 6px rgba(0, 0, 0, 0.05)',
+                                                    fontFamily: 'ui-monospace, SFMono-Regular, monospace'
+                                                }}>
                                                     {globalIdx}
                                                 </td>
                                                 {columns.map((col, j) => {
@@ -1015,8 +1614,13 @@ const NpsAnalyzer: React.FC = () => {
                                                         <td
                                                             key={j}
                                                             style={{
+                                                                padding: '9px 14px',
+                                                                fontSize: '13px',
+                                                                color: '#0f172a',
+                                                                borderRight: '1px solid #e2e8f0',
+                                                                borderBottom: '1px solid #e2e8f0',
                                                                 whiteSpace: col.toLowerCase().includes('feedback') ? 'normal' : 'nowrap',
-                                                                maxWidth: col.toLowerCase().includes('feedback') ? '350px' : '250px',
+                                                                maxWidth: col.toLowerCase().includes('feedback') ? '350px' : '260px',
                                                                 overflow: 'hidden',
                                                                 textOverflow: 'ellipsis'
                                                             }}
@@ -1060,6 +1664,15 @@ const NpsAnalyzer: React.FC = () => {
                                                                 <span className="vin-chip">
                                                                     {strVal}
                                                                 </span>
+                                                            ) : strVal && (strVal.startsWith('http://') || strVal.startsWith('https://')) ? (
+                                                                <a
+                                                                    href={strVal}
+                                                                    target="_blank"
+                                                                    rel="noopener noreferrer"
+                                                                    style={{ color: '#2563eb', fontWeight: 600, textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '12px' }}
+                                                                >
+                                                                    View Photo ↗
+                                                                </a>
                                                             ) : (
                                                                 strVal || '—'
                                                             )}
@@ -1073,19 +1686,20 @@ const NpsAnalyzer: React.FC = () => {
                             </tbody>
                         </table>
                     </div>
+                </div>
 
                     {/* Pagination Footer */}
                     <div style={{
                         display: 'flex',
                         justifyContent: 'space-between',
                         alignItems: 'center',
-                        padding: '14px 24px',
-                        background: 'var(--color-surface-2)',
-                        borderTop: '1px solid var(--color-border)',
+                        padding: '10px 20px',
+                        background: '#f8fafc',
+                        borderTop: '2px solid #e2e8f0',
                         flexWrap: 'wrap',
                         gap: '12px'
                     }}>
-                        <div style={{ color: 'var(--color-text-muted)', fontSize: '13px' }}>
+                        <div style={{ color: '#64748b', fontSize: '12.5px', fontWeight: 500 }}>
                             Showing {filteredData.length === 0 ? 0 : (currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, filteredData.length)} of {filteredData.length} records
                         </div>
                         <div style={{ display: 'flex', gap: '8px' }}>
@@ -1093,18 +1707,18 @@ const NpsAnalyzer: React.FC = () => {
                                 className="modern-btn modern-btn-outline"
                                 disabled={currentPage === 1}
                                 onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                                style={{ opacity: currentPage === 1 ? 0.5 : 1, cursor: currentPage === 1 ? 'not-allowed' : 'pointer' }}
+                                style={{ opacity: currentPage === 1 ? 0.5 : 1, cursor: currentPage === 1 ? 'not-allowed' : 'pointer', padding: '6px 12px', fontSize: '12px' }}
                             >
                                 <ChevronLeft size={14} /> Previous
                             </button>
-                            <span style={{ display: 'flex', alignItems: 'center', padding: '0 8px', fontSize: '13px', fontWeight: 600, color: 'var(--color-text)' }}>
+                            <span style={{ display: 'flex', alignItems: 'center', padding: '0 8px', fontSize: '12.5px', fontWeight: 700, color: 'var(--color-text)' }}>
                                 Page {currentPage} of {totalPages}
                             </span>
                             <button
                                 className="modern-btn modern-btn-outline"
                                 disabled={currentPage === totalPages || filteredData.length === 0}
                                 onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                                style={{ opacity: (currentPage === totalPages || filteredData.length === 0) ? 0.5 : 1, cursor: (currentPage === totalPages || filteredData.length === 0) ? 'not-allowed' : 'pointer' }}
+                                style={{ opacity: (currentPage === totalPages || filteredData.length === 0) ? 0.5 : 1, cursor: (currentPage === totalPages || filteredData.length === 0) ? 'not-allowed' : 'pointer', padding: '6px 12px', fontSize: '12px' }}
                             >
                                 Next <ChevronRight size={14} />
                             </button>

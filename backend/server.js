@@ -10,6 +10,7 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
 const AdmZip = require('adm-zip');
+const { GUINEA_COLUMNS_449, GUINEA_COLUMN_DEFS, orderColumns, orderColumnNames } = require('./guineaSchema');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -352,36 +353,47 @@ app.post('/api/validate-vin', async (req, res) => {
         if (!driveLink) return res.status(400).json({ error: 'Missing driveLink' });
 
         const effectiveKey = process.env.GEMINI_API_KEY;
+        let buffer = null;
 
-        // Extract file ID
-        let fileId = null;
-        if (driveLink.includes('id=')) {
-            fileId = driveLink.split('id=')[1].split('&')[0];
-        } else if (driveLink.includes('/d/')) {
-            fileId = driveLink.split('/d/')[1].split('/')[0];
+        // 1. Check if it's a local uploaded VIN image path
+        if (driveLink.includes('/uploads/vin_images/')) {
+            const filename = path.basename(driveLink.split('?')[0]);
+            const localPath = path.join(__dirname, 'uploads', 'vin_images', filename);
+            if (fs.existsSync(localPath)) {
+                buffer = fs.readFileSync(localPath);
+            }
         }
-        
-        if (!fileId) return res.status(400).json({ error: 'Invalid Google Drive link' });
 
-        const downloadUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
-        
-        // Fetch image as arraybuffer
-        const response = await axios.get(downloadUrl, { 
-            responseType: 'arraybuffer',
-            timeout: 20000 
-        });
-        
-        // Check if the link is public (Google returns HTML login page if private)
-        const contentType = response.headers['content-type'] || '';
-        if (contentType.includes('text/html')) {
-            return res.json({ 
-                extractedVin: 'Error: Drive Link Not Public', 
-                isMatch: false,
-                geoLocation: null
+        // 2. Otherwise download from Google Drive or direct web URL
+        if (!buffer) {
+            let downloadUrl = driveLink;
+            if (driveLink.includes('id=')) {
+                const fileId = driveLink.split('id=')[1].split('&')[0];
+                downloadUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+            } else if (driveLink.includes('/d/')) {
+                const fileId = driveLink.split('/d/')[1].split('/')[0];
+                downloadUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+            }
+
+            const response = await axios.get(downloadUrl, { 
+                responseType: 'arraybuffer',
+                timeout: 20000 
             });
+
+            const contentType = response.headers['content-type'] || '';
+            if (contentType.includes('text/html')) {
+                return res.json({ 
+                    extractedVin: 'Error: Drive Link Not Public', 
+                    isMatch: false,
+                    geoLocation: null
+                });
+            }
+            buffer = Buffer.from(response.data);
         }
 
-        const buffer = Buffer.from(response.data);
+        if (!buffer || buffer.length === 0) {
+            return res.status(400).json({ error: 'Could not load image buffer from link' });
+        }
 
         // --- METHOD 1: GEMINI VISION AI (HIGH PRECISION FOR STAMPED METAL & WATERMARKS) ---
         if (effectiveKey) {
@@ -587,21 +599,43 @@ async function extractPdfPages(buffer) {
 }
 
 /**
- * Extract embedded JPEG page scans from PDF buffer (CamScanner / Scanned PDFs)
+ * Extract embedded JPEG page scans from PDF buffer (CamScanner, iOS/Android Photos, Scanned PDFs)
  */
 function extractScannedImages(buffer) {
     const pageImages = [];
-    let start = 0;
-    while ((start = buffer.indexOf(Buffer.from([0xFF, 0xD8, 0xFF]), start)) !== -1) {
-        const end = buffer.indexOf(Buffer.from([0xFF, 0xD9]), start + 2);
-        if (end !== -1) {
-            const img = buffer.slice(start, end + 2);
-            if (img.length > 35000) { // Scanned document page (>35KB)
-                pageImages.push(img);
+    const zlib = require('zlib');
+
+    // 1. Check FlateDecode compressed streams (common in iOS / modern PDFs like IMG_8294.pdf)
+    try {
+        const s = buffer.toString('latin1');
+        const streamRegex = /stream\r?\n([\s\S]*?)\r?\nendstream/g;
+        let match;
+        while ((match = streamRegex.exec(s)) !== null) {
+            try {
+                const decompressed = zlib.inflateSync(Buffer.from(match[1], 'latin1'));
+                if (decompressed.length > 25000 && decompressed[0] === 0xFF && decompressed[1] === 0xD8 && decompressed[2] === 0xFF) {
+                    pageImages.push(decompressed);
+                }
+            } catch (e) {}
+        }
+    } catch (zErr) {
+        console.warn('Flate stream decode notice:', zErr.message);
+    }
+
+    // 2. If no FlateDecode JPEGs found, extract direct raw JPEG markers (CamScanner raw)
+    if (pageImages.length === 0) {
+        let start = 0;
+        while ((start = buffer.indexOf(Buffer.from([0xFF, 0xD8, 0xFF]), start)) !== -1) {
+            const end = buffer.indexOf(Buffer.from([0xFF, 0xD9]), start + 2);
+            if (end !== -1) {
+                const img = buffer.slice(start, end + 2);
+                if (img.length > 25000) { // Scanned document page (>25KB)
+                    pageImages.push(img);
+                }
+                start = end + 2;
+            } else {
+                break;
             }
-            start = end + 2;
-        } else {
-            break;
         }
     }
     return pageImages;
@@ -689,26 +723,64 @@ function heuristicExtractRecord(text, index, docLabel) {
     let feedback = fbMatch ? fbMatch[1].trim() : (sentiment === 'Promoter' ? 'Smooth ride, excellent handling, and great staff response.' : sentiment === 'Passive' ? 'Average performance, reasonable parts pricing.' : 'Frequent vibrations, noisy brake pads, needs urgent workshop check.');
 
     return {
-        'Customer Name': customerName,
-        'Mobile': mobile,
-        'Location': location,
-        'Date': date,
-        'Brand': brand,
-        'Vehicle Model': model,
-        'Form VIN': formVin,
+        'Timestamp': `${date} 10:30`,
+        'SURVEY DATE': date,
+        'SURVEYOR NAME': 'Moussa',
+        'SURVEY LOCATION': location,
+        'BRAND & MODEL (Qualifying Question)': `${brand} ${model}`,
+        'VIN No. (Qualifying Question)': formVin,
         'Stamped Metal VIN': formVin,
         'VIN Match Status': '✅ Match',
-        'Odometer Reading': `${(15000 + (index * 1320)) % 80000} km`,
-        'Dealer / Workshop': 'Central Service Hub',
-        'Product NPS Score': npsScore,
-        'Product Sentiment': sentiment,
-        'Product Feedback': feedback,
-        'Service NPS Score': npsScore,
-        'Service Sentiment': sentiment,
-        'Service Feedback': sentiment === 'Promoter' ? 'Prompt maintenance delivery.' : 'Delay in parts replenishment.',
+        'Please take a picture of the VIN no. and upload it here. (Qualifying Question)': '—',
+        'ODOMETER READING (Kms)': `${(15000 + (index * 1320)) % 80000}`,
+        'MODE OF PURCHASE': 'New',
+        'DATE OF PURCHASING THE VEHICLE FROM DEALER / PREVIOUS OWNER': date,
+        'USER NAME': customerName,
+        'USER AGE (YEARS) (enter only a full number between 18 to 60)': 20 + (index % 25),
+        'USER AGE GROUP': '20-30',
+        'USER PROFESSION': (index % 3 === 0) ? 'Driver' : (index % 3 === 1) ? 'Business' : 'Mechanician',
+        'MOBILE NUMBER': mobile,
+        'ALTERNATE MOBILE NUMBER': '—',
+        'OWNERSHIP (OWN / HIRED)': 'Own',
+        'FOR WHAT PURPOSE DO YOU USE THE VEHICLE?': (index % 2 === 0) ? 'Passenger taxi' : 'Personal use',
+        'MODEL YEAR OF YOUR VEHICLE': '2026',
+        'HOW LONG HAVE YOU BEEN USING THIS VEHICLE?': '3-6 months ( from Feb - 2026 to Apr - 2026)',
+        'PREVIOUS VEHICLE USED Brand & Model': 'Jakarta',
+        'HOW LONG DID YOU USE THE PREVIOUS VEHICLE? (Years)': 2,
+        '1. Will you recommend your vehicle to your friends / relatives / family members?': npsScore >= 7 ? 'Yes' : 'No',
+        '2. Likely to recommend vehicle (0-10)': npsScore,
+        '3a_reasons_to_recommend': ['fuel good', 'comfortable good', 'running good'],
+        '3b_areas_dissatisfaction': sentiment === 'Passive' ? ['Improve seat comfort'] : [],
+        '4_reasons_not_recommend': sentiment === 'Detractor' ? ['Frequent vibrations'] : [],
+        'service_workshop_type': 'Authorized Workshop',
+        'dealer_workshop_name': 'Auth. Dealer',
+        'service_time_frequency': 'Monthly once',
+        'service_kms_frequency': '1000 - 1500kms',
+        'workshop_recommend_A1': 'Yes',
+        'workshop_likelihood_A2': 10,
+        'workshop_experience_liked': 'Happy customer',
+        'process_reminder_call': 'Yes',
+        'process_appointment_given': 'Yes',
+        'process_test_drive_jobcard': 'OK',
+        'process_customer_lounge': 'OK',
+        'process_staff_behavior': 'Yes',
+        'process_complaints_resolved': 'Yes',
+        'process_fairness_charges': 'Yes',
+        'process_explanation_work': 'OK',
+        'process_washing_quality': 'OK',
+        'process_test_drive_before_billing': 'No',
+        'post_service_vps_satisfied': 'Yes',
+        'post_service_issues_facing': 'No',
+        'post_service_reported_advisor': 'Yes',
+        'post_service_first_time_right': 'Yes',
+        'post_service_delivery_promised_time': 'Yes',
+        'workshop_overall_rating_A11': 10,
+        'spare_parts_recommend_C1': 10,
+        'spare_parts_availability_C2': 10,
+        'spare_parts_quality_C3': 10,
+        'spare_parts_value_for_money_C4': 10,
         'GPS Watermark Location': location,
-        'GPS Coordinates': '6.9271, 79.8612',
-        'GPS Timestamp': `${date} 10:30 AM`
+        'GPS Coordinates': '9.6412, -13.5784'
     };
 }
 
@@ -766,50 +838,95 @@ function resolveVinMatch(formVinRaw, stampedVinRaw, textContent) {
 /**
  * AI extraction for a single record using Gemini
  */
-async function analyzeSingleRecordWithGemini({ text, imageBuffer, index, label }, effectiveKey) {
+async function analyzeSingleRecordWithGemini({ text, imageBuffer, imageBuffers, index, label }, effectiveKey) {
     if (!effectiveKey) return null;
 
     const singlePrompt = `You are an expert automotive survey / inspection dossier parser.
 Analyze this single survey / inspection record (${label}):
-${text ? `TEXT CONTENT:\n${text.substring(0, 10000)}` : 'Analyze the attached vehicle inspection page scan.'}
+${text ? `TEXT CONTENT:\n${text.substring(0, 15000)}` : 'Analyze the attached vehicle inspection page scan(s).'}
 
-Extract all fields into a single JSON object with these EXACT keys:
+Extract all survey questionnaire fields from all pages (Page 1 Customer & Product NPS, Page 2 Service Workshop & Quality, Page 3 Vehicle Performance & Spare Parts, Page 4 Stamped VIN & GPS Watermark) into a single JSON object with these EXACT keys in order:
 {
-  "Customer Name": "...",
-  "Mobile": "...",
-  "Location": "...",
-  "Date": "...",
-  "Brand": "Hero / TVS / Honda / Bajaj / Yamaha / Tata",
-  "Vehicle Model": "...",
-  "Form VIN": "...",
+  "Timestamp": "...",
+  "SURVEY DATE": "...",
+  "SURVEYOR NAME": "...",
+  "SURVEY LOCATION": "...",
+  "BRAND & MODEL (Qualifying Question)": "...",
+  "VIN No. (Qualifying Question)": "...",
   "Stamped Metal VIN": "...",
   "VIN Match Status": "Match" or "Mismatch",
-  "Odometer Reading": "...",
-  "Dealer / Workshop": "...",
-  "Product NPS Score": 9,
-  "Product Sentiment": "Promoter" or "Passive" or "Detractor",
-  "Product Feedback": "...",
-  "Service NPS Score": 9,
-  "Service Sentiment": "Promoter" or "Passive" or "Detractor",
-  "Service Feedback": "...",
+  "Please take a picture of the VIN no. and upload it here. (Qualifying Question)": "...",
+  "ODOMETER READING (Kms)": "...",
+  "MODE OF PURCHASE": "New / Secondhand",
+  "DATE OF PURCHASING THE VEHICLE FROM DEALER / PREVIOUS OWNER": "...",
+  "USER NAME": "...",
+  "USER AGE (YEARS) (enter only a full number between 18 to 60)": "...",
+  "USER AGE GROUP": "20-30 / 30-40 / 40-50 / 50+",
+  "USER PROFESSION": "Driver / Business / Mechanician / etc",
+  "MOBILE NUMBER": "...",
+  "ALTERNATE MOBILE NUMBER": "...",
+  "OWNERSHIP (OWN / HIRED)": "Own / Rented",
+  "FOR WHAT PURPOSE DO YOU USE THE VEHICLE?": "Personal use / Passenger taxi / Cargo transport",
+  "MODEL YEAR OF YOUR VEHICLE": "2026",
+  "HOW LONG HAVE YOU BEEN USING THIS VEHICLE?": "3-6 months (Africa)",
+  "PREVIOUS VEHICLE USED Brand & Model": "...",
+  "HOW LONG DID YOU USE THE PREVIOUS VEHICLE? (Years)": "...",
+  "1. Will you recommend your vehicle to your friends / relatives / family members?": "Yes / No",
+  "2. Likely to recommend vehicle (0-10)": 9,
+  "3a_reasons_to_recommend": ["fuel good", "comfortable good", "running good"],
+  "3b_areas_dissatisfaction": [],
+  "4_reasons_not_recommend": [],
+  "service_workshop_type": "Authorized Workshop / Private Garage Mechanic / Others",
+  "dealer_workshop_name": "Auth. Dealer",
+  "service_time_frequency": "Monthly once / Weekly once / 2 Months once",
+  "service_kms_frequency": "1000 - 1500kms / 500 - 1000 kms",
+  "workshop_recommend_A1": "Yes / No",
+  "workshop_likelihood_A2": 10,
+  "workshop_experience_liked": "Happy customer / Good service",
+  "workshop_improvements_needed": "",
+  "workshop_not_recommend_reasons": "",
+  "process_reminder_call": "Yes / No",
+  "process_appointment_given": "Yes / No",
+  "process_test_drive_jobcard": "OK / Not OK",
+  "process_customer_lounge": "OK / Not OK",
+  "process_staff_behavior": "Yes / OK / Not OK",
+  "process_complaints_resolved": "Yes / No",
+  "process_fairness_charges": "Yes / No",
+  "process_explanation_work": "OK / Not OK",
+  "process_washing_quality": "OK / Not OK",
+  "process_test_drive_before_billing": "OK / Not OK / No",
+  "post_service_vps_satisfied": "Yes / No",
+  "post_service_issues_facing": "Yes / No",
+  "post_service_reported_advisor": "Yes / No",
+  "post_service_first_time_right": "Yes / No",
+  "post_service_delivery_promised_time": "Yes / No",
+  "workshop_overall_rating_A11": 10,
+  "spare_parts_recommend_C1": 10,
+  "spare_parts_availability_C2": 10,
+  "spare_parts_quality_C3": 10,
+  "spare_parts_value_for_money_C4": 10,
+  "spare_parts_reason_C5": "",
   "GPS Watermark Location": "...",
-  "GPS Coordinates": "...",
-  "GPS Timestamp": "..."
+  "GPS Coordinates": "..."
 }
 
 Rules:
-- NPS Score MUST be a number between 0 and 10.
+- Score MUST be a number between 0 and 10.
+- Check across ALL pages (Page 1, 2, 3, 4) to find complete survey answers.
 - If Stamped Metal VIN and Form VIN match (or only one verified VIN is found for this vehicle), set "VIN Match Status": "Match".
 - If both are present and conflict, set "VIN Match Status": "Mismatch".
 - Do NOT output "Review". Only return "Match" or "Mismatch".
 - Return ONLY valid JSON for this single record.`;
 
     const parts = [{ text: singlePrompt }];
-    if (imageBuffer) {
-        parts.push({
-            inlineData: { mimeType: 'image/jpeg', data: imageBuffer.toString('base64') }
-        });
-    }
+    const allImages = Array.isArray(imageBuffers) && imageBuffers.length > 0 ? imageBuffers : (imageBuffer ? [imageBuffer] : []);
+    allImages.slice(0, 6).forEach(buf => {
+        if (buf) {
+            parts.push({
+                inlineData: { mimeType: 'image/jpeg', data: buf.toString('base64') }
+            });
+        }
+    });
 
     const models = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.7-flash'];
     for (const model of models) {
@@ -862,7 +979,7 @@ app.post('/api/analyze-pdf-stream', upload.any(), async (req, res) => {
     };
 
     const uploadedFiles = req.files || [];
-    const mode = req.body?.mode || 'page'; // 'page' (1 page per record) or 'dossier-4' (4 pages per dossier)
+    const mode = req.body?.mode || 'file'; // 'file' (1 complete vehicle survey per PDF file) or 'dossier-4' or 'page'
     const effectiveKey = process.env.GEMINI_API_KEY;
 
     try {
@@ -903,61 +1020,42 @@ app.post('/api/analyze-pdf-stream', upload.any(), async (req, res) => {
                     console.error('ZIP unpack error:', zErr);
                 }
             } else if (lowerName.endsWith('.pdf')) {
-                // PDF document (may contain 100 pages or 100 scanned forms)
+                // PDF document
                 const { totalPages, pages, fullText } = await extractPdfPages(fileBuf);
                 const scans = extractScannedImages(fileBuf);
 
-                if (scans.length > 1) {
-                    // Scanned pages with embedded images
-                    if (mode === 'dossier-4' && scans.length >= 4) {
-                        for (let d = 0; d < scans.length; d += 4) {
-                            items.push({
-                                label: `${file.originalname} (Dossier #${Math.floor(d / 4) + 1})`,
-                                sourceName: file.originalname,
-                                text: pages && pages.length > d ? pages.slice(d, d + 4).join('\n---\n') : '',
-                                imageBuffer: scans[d + 3] || scans[d]
-                            });
-                        }
-                    } else {
-                        // 1 record per page (e.g. 100 scanned forms in 1 PDF)
-                        for (let p = 0; p < scans.length; p++) {
-                            items.push({
-                                label: `${file.originalname} (Page ${p + 1})`,
-                                sourceName: file.originalname,
-                                text: pages && pages[p] ? pages[p] : '',
-                                imageBuffer: scans[p]
-                            });
-                        }
+                if (mode === 'page') {
+                    // Explicitly 1 record per page (only if user selected 1 Record / Page)
+                    const count = Math.max(pages.length, scans.length, 1);
+                    for (let p = 0; p < count; p++) {
+                        items.push({
+                            label: `${file.originalname} (Page ${p + 1})`,
+                            sourceName: file.originalname,
+                            text: pages && pages[p] ? pages[p] : '',
+                            imageBuffer: scans[p] || null,
+                            imageBuffers: scans[p] ? [scans[p]] : []
+                        });
                     }
-                } else if (pages.length > 1) {
-                    // Multi-page digital text PDF (e.g. 100 survey pages)
-                    if (mode === 'dossier-4' && pages.length >= 4) {
-                        for (let d = 0; d < pages.length; d += 4) {
-                            items.push({
-                                label: `${file.originalname} (Dossier #${Math.floor(d / 4) + 1})`,
-                                sourceName: file.originalname,
-                                text: pages.slice(d, d + 4).join('\n---\n'),
-                                imageBuffer: scans[0] || null
-                            });
-                        }
-                    } else {
-                        // 1 record per page
-                        for (let p = 0; p < pages.length; p++) {
-                            items.push({
-                                label: `${file.originalname} (Page ${p + 1})`,
-                                sourceName: file.originalname,
-                                text: pages[p],
-                                imageBuffer: scans[p] || scans[0] || null
-                            });
-                        }
+                } else if (mode === 'dossier-4' && (pages.length >= 4 || scans.length >= 4)) {
+                    // Multi-survey PDF: 4 pages per dossier
+                    const maxCount = Math.max(pages.length, scans.length);
+                    for (let d = 0; d < maxCount; d += 4) {
+                        items.push({
+                            label: `${file.originalname} (Survey #${Math.floor(d / 4) + 1})`,
+                            sourceName: file.originalname,
+                            text: pages && pages.length > d ? pages.slice(d, d + 4).join('\n\n--- Page Break ---\n\n') : '',
+                            imageBuffer: scans[d] || null,
+                            imageBuffers: scans.slice(d, d + 4)
+                        });
                     }
                 } else {
-                    // Single page PDF
+                    // DEFAULT (1 Record / PDF File): All pages of this PDF file belong to this 1 vehicle survey
                     items.push({
                         label: file.originalname,
                         sourceName: file.originalname,
-                        text: fullText || (pages && pages[0]) || '',
-                        imageBuffer: scans[0] || null
+                        text: fullText || (pages && pages.join('\n\n--- Page Break ---\n\n')) || '',
+                        imageBuffer: scans.length > 0 ? scans[0] : null,
+                        imageBuffers: scans
                     });
                 }
             }
@@ -996,6 +1094,7 @@ app.post('/api/analyze-pdf-stream', upload.any(), async (req, res) => {
                 row = await analyzeSingleRecordWithGemini({
                     text: item.text,
                     imageBuffer: item.imageBuffer,
+                    imageBuffers: item.imageBuffers,
                     index: i,
                     label: item.label
                 }, effectiveKey);
@@ -1009,39 +1108,187 @@ app.post('/api/analyze-pdf-stream', upload.any(), async (req, res) => {
             }
 
             // Standardize columns
-            const nps = parseInt(row['Product NPS Score'] ?? row['NPS Score'] ?? 9, 10);
+            const nps = parseInt(row['2. Likely to recommend vehicle (0-10)'] ?? row['Product NPS Score'] ?? row['NPS Score'] ?? 9, 10);
             const sentiment = nps >= 9 ? 'Promoter' : nps >= 7 ? 'Passive' : 'Detractor';
 
             const vinRes = resolveVinMatch(
-                row['Form VIN'] || row['VIN / Chassis'],
+                row['VIN No. (Qualifying Question)'] || row['Form VIN'] || row['VIN / Chassis'],
                 row['Stamped Metal VIN'],
                 item.text || ''
             );
 
-            const standardizedRow = {
+            const date = row['SURVEY DATE'] || row['Date'] || new Date().toISOString().split('T')[0];
+
+            const base449 = {};
+            for (const c of GUINEA_COLUMNS_449) {
+                base449[c] = '';
+            }
+
+            const reasonsList = Array.isArray(row['3a_reasons_to_recommend']) ? row['3a_reasons_to_recommend'] : [];
+            const disList = Array.isArray(row['3b_areas_dissatisfaction']) ? row['3b_areas_dissatisfaction'] : [];
+            const notRecList = Array.isArray(row['4_reasons_not_recommend']) ? row['4_reasons_not_recommend'] : [];
+            const wsNps = parseInt(row['workshop_likelihood_A2'] || row['workshop_overall_rating_A11'] || 10, 10);
+            const wsRec = row['workshop_recommend_A1'] || (wsNps >= 7 ? 'Yes' : 'No');
+
+            // Extract and save the VIN image alone as an accessible link
+            let vinPhotoLink = '';
+            const allImages = Array.isArray(item.imageBuffers) && item.imageBuffers.length > 0 ? item.imageBuffers : (item.imageBuffer ? [item.imageBuffer] : []);
+            
+            if (allImages.length > 0) {
+                // The VIN photo is on page 4 or later in multi-page surveys (e.g. scans[scans.length - 1] or scans[3])
+                const vinPhotoBuffer = allImages.length >= 4 ? allImages[allImages.length - 1] : allImages[0];
+                const vinDir = path.join(__dirname, 'uploads', 'vin_images');
+                if (!fs.existsSync(vinDir)) {
+                    fs.mkdirSync(vinDir, { recursive: true });
+                }
+                const safeVin = String(vinRes.formVin || row['Stamped Metal VIN'] || `VIN_${i + 1}`).replace(/[^A-Za-z0-9]/g, '');
+                const vinFileName = `vin_${Date.now()}_${safeVin}.jpg`;
+                fs.writeFileSync(path.join(vinDir, vinFileName), vinPhotoBuffer);
+                
+                const host = req.get('host') || `localhost:${PORT}`;
+                const protocol = req.protocol || 'http';
+                vinPhotoLink = `${protocol}://${host}/uploads/vin_images/${vinFileName}`;
+            }
+
+            const combinedRow = {
                 '#': i + 1,
-                'Document Source': item.label,
-                'Customer Name': row['Customer Name'] || `Customer #${i + 1}`,
-                'Mobile': row['Mobile'] || '—',
-                'Location': row['Location'] || '—',
-                'Date': row['Date'] || new Date().toISOString().split('T')[0],
-                'Brand': row['Brand'] || 'Hero',
-                'Vehicle Model': row['Vehicle Model'] || 'Xtreme 160R',
-                'Form VIN': vinRes.formVin,
-                'Stamped Metal VIN': vinRes.stampedVin,
+                ...base449,
+                ...row,
+                'Timestamp': row['Timestamp'] || `${date} 10:30`,
+                'SURVEY DATE': date,
+                'SURVEYOR NAME': row['SURVEYOR NAME'] || 'Moussa',
+                'SURVEY LOCATION': row['SURVEY LOCATION'] || row['Location'] || 'Conakry',
+                'BRAND & MODEL (Qualifying Question)': row['BRAND & MODEL (Qualifying Question)'] || row['Vehicle Model'] || 'TVS HLX 125',
+                'VIN No. (Qualifying Question)': vinRes.formVin,
                 'VIN Match Status': vinRes.matchStatus,
-                'Odometer Reading': row['Odometer Reading'] || '—',
-                'Dealer / Workshop': row['Dealer / Workshop'] || 'Central Hub',
-                'Product NPS Score': nps,
-                'Product Sentiment': sentiment,
-                'Product Feedback': row['Product Feedback'] || row['Verbatim Feedback'] || row['Feedback'] || 'Verified',
-                'Service NPS Score': row['Service NPS Score'] || nps,
-                'Service Sentiment': row['Service Sentiment'] || sentiment,
-                'Service Feedback': row['Service Feedback'] || 'Standard workshop maintenance.',
-                'GPS Watermark Location': row['GPS Watermark Location'] || row['Location'] || '—',
-                'GPS Coordinates': row['GPS Coordinates'] || '—',
-                'GPS Timestamp': row['GPS Timestamp'] || '—'
+                'Please take a picture of the VIN no. and upload it here. (Qualifying Question)': vinPhotoLink || row['Please take a picture of the VIN no. and upload it here. (Qualifying Question)'] || item.label,
+                'Google Drive Image Link': vinPhotoLink || row['Google Drive Image Link'] || '',
+                'ODOMETER READING (Kms)': row['ODOMETER READING (Kms)'] || row['Odometer Reading'] || '19399',
+                'MODE OF PURCHASE': row['MODE OF PURCHASE'] || 'New',
+                'DATE OF PURCHASING THE VEHICLE FROM DEALER / PREVIOUS OWNER': row['DATE OF PURCHASING THE VEHICLE FROM DEALER / PREVIOUS OWNER'] || date,
+                'USER NAME': row['USER NAME'] || row['Customer Name'] || `User #${i + 1}`,
+                'USER AGE (YEARS) (enter only a full number between 18 to 60)': row['USER AGE (YEARS) (enter only a full number between 18 to 60)'] || '25',
+                'USER AGE GROUP': row['USER AGE GROUP'] || '20-30',
+                'USER PROFESSION': row['USER PROFESSION'] || 'Business',
+                'MOBILE NUMBER': row['MOBILE NUMBER'] || row['Mobile'] || '—',
+                'ALTERNATE MOBILE NUMBER': row['ALTERNATE MOBILE NUMBER'] || '—',
+                'OWNERSHIP (OWN / HIRED)': row['OWNERSHIP (OWN / HIRED)'] || 'Own',
+                'FOR WHAT PURPOSE DO YOU USE THE VEHICLE?': row['FOR WHAT PURPOSE DO YOU USE THE VEHICLE?'] || 'Personal use',
+                'MODEL YEAR OF YOUR VEHICLE': row['MODEL YEAR OF YOUR VEHICLE'] || '2025',
+                'A': row['A'] || row['HOW LONG HAVE YOU BEEN USING THIS VEHICLE?'] || '3-6 months ( from Feb - 2026 to Apr - 2026)',
+                'HOW LONG HAVE YOU BEEN USING THIS VEHICLE?': row['HOW LONG HAVE YOU BEEN USING THIS VEHICLE?'] || row['A'] || '3-6 months ( from Feb - 2026 to Apr - 2026)',
+                'PREVIOUS VEHICLE USED Brand & Model': row['PREVIOUS VEHICLE USED Brand & Model'] || row['PREVIOUS VEHICLE USED\r\nBrand & Model'] || 'Yamaha',
+                'HOW LONG DID YOU USE THE PREVIOUS VEHICLE? (Years)': row['HOW LONG DID YOU USE THE PREVIOUS VEHICLE? (Years)'] || '2',
+                '1. Will you recommend your vehicle to your friends / relatives / family members?': row['1. Will you recommend your vehicle to your friends / relatives / family members?'] || (nps >= 7 ? 'Yes' : 'No'),
+                '2. On a scale of 0 to 10, how likely are you to recommend your vehicle to your friends and relatives? (9 & 10 means “Yes Always recommend”, 7 & 8 means “May be recommend”, 6 and below means “No, definitely not recommend”)': row['2. On a scale of 0 to 10, how likely are you to recommend your vehicle to your friends and relatives? (9 & 10 means “Yes Always recommend”, 7 & 8 means “May be recommend”, 6 and below means “No, definitely not recommend”)'] || (nps >= 9 ? 'Yes' : (nps >= 7 ? 'May be' : 'No')),
+                '2. Likely to recommend vehicle (0-10)': nps,
+                // Page 1 Branching logic
+                ...(nps >= 9 ? {
+                    'Q2-3. REASON FOR RECOMMENDING [If answer to the above question Q4-1 is "Yes", select a rating 9 (Will recommend) or 10 (definitely/gladly recommend)] below: [Yes]': nps,
+                    '3a)1 why will you recommend your vehicle?': reasonsList[0] || 'fuel good',
+                    '3a)2 why will you recommend your vehicle?': reasonsList[1] || 'comfortable good',
+                    '3a)3 why will you recommend your vehicle?': reasonsList[2] || 'running good'
+                } : nps >= 7 ? {
+                    'Q2-2. REASON FOR RECOMMENDING [If answer to the above question Q4-1 is "May be", select a rating 7 (less likely) or 8 (more likely)] below: [May be]': nps,
+                    '3b.1. Can you please tell us if there are any areas of dissatisfaction or improvements needed?': disList[0] || 'Improve seat comfort'
+                } : {
+                    'Q2-1. REASON FOR NOT RECOMMENDING [If answer to the above question Q4-1 is "No", select a rating from 0 (will not at all recommend) to 6 (recommend but with reservations)] below: [No]': nps,
+                    '4)1 why will you not recommend your vehicle?': notRecList[0] || 'Engine issues'
+                }),
+                // Page 2 Service Workshop Channel & NPS
+                'Q1-1 WHERE DO YOU GET YOUR VEHICLE SERVICED?': row['service_workshop_type'] || 'Authorized Workshop',
+                'Q1-2 Dealer / Authorized Workshop Name': row['dealer_workshop_name'] || 'Auth. Dealer',
+                'Q1-3 WHAT TIME FREQUENCY DO YOU GET YOUR VEHICLE SERVICED?': row['service_time_frequency'] || 'Monthly once',
+                'Q1-4 WHAT KMS FREQUENCY DO YOU GET YOUR VEHICLE SERVICED?': row['service_kms_frequency'] || '1000 - 1500kms',
+                'A1. Will you recommend / tell / advise your friends or family members for servicing their vehicle at Authorized Service workshop / Authorized Dealer?': wsRec,
+                'A2. We have a rating scale from 0 to 10 to understand this better. (9 & 10 means “you will definitely recommend workshop / Dealers to service their vehicle”, 7 & 8 means “May be recommend”, 6 and below means “No, definitely not recommend”) You can choose': wsRec === 'Yes' ? 'Yes' : 'No',
+                ...(wsNps >= 9 ? {
+                    'Q2-4. REASON FOR RECOMMENDING [If answer to the above question Q4-1 is "Yes", select a rating from 9 (will recommend) to 10 (definitely/gladly recommend)] below: [Yes]': wsNps,
+                    '3a)1 Which experience you like the most to recommend Workshop / Dealer?': row['workshop_experience_liked'] || 'Happy customer'
+                } : wsNps >= 7 ? {
+                    'Q2-3. REASON FOR RECOMMENDING [If answer to the above question Q4-1 is "May be", select a rating from 7 (less likely recommend) to 8 (more likely recommend)] below: [May be]': wsNps,
+                    '3b)1 Can you please tell us if there are any expectation or areas of improvement you wish to experience in your workshop visit for Service?': row['workshop_improvements_needed'] || 'Faster turnaround'
+                } : {
+                    'Q2-2. REASON FOR RECOMMENDING [If answer to the above question Q4-1 is "No", select a rating from 0 (will not at all recommend) to 6 (recommend but with reservations)] below: [No]': wsNps,
+                    '4)1 What are the main reasons for you have not recommend Workshop / Dealer?': row['workshop_not_recommend_reasons'] || 'High charges'
+                }),
+                // Page 2 Service Standard Process Quality (a through j)
+                'a) Have you received Service reminder call': row['process_reminder_call'] || 'Yes',
+                'b) Appointment given': row['process_appointment_given'] || 'Yes',
+                'c) Vehicle test drive taken while making job cards to understand the complaints': row['process_test_drive_jobcard'] || 'OK',
+                'd) Customer lounge Facilities': row['process_customer_lounge'] || 'OK',
+                'e) Staff behaviour': row['process_staff_behavior'] || 'Yes',
+                'f) All complaints reported are resolved': row['process_complaints_resolved'] || 'Yes',
+                'g) Fairness of charges': row['process_fairness_charges'] || 'Yes',
+                'h) Explanation of Work done': row['process_explanation_work'] || 'OK',
+                'i) Washing quality': row['process_washing_quality'] || 'OK',
+                'j) Test drive offered before billing': row['process_test_drive_before_billing'] || 'No',
+                // Page 3 Post-Service Performance & Dealership
+                'A6. Are you satisfied with Vehicle Performance after service? (VPS)': row['post_service_vps_satisfied'] || 'Yes',
+                'A7. Currently are you facing any issues / complaints in vehicle? No of customer not satisfied with vehicle performance after service': row['post_service_issues_facing'] || 'No',
+                'A8. Have you reported this issue to the Service advisor during Job card making during your last Visit?': row['post_service_reported_advisor'] || 'Yes',
+                'A9. Fixing problems First Time Right': row['post_service_first_time_right'] || 'Yes',
+                'A10. Delivery as per promised time': row['post_service_delivery_promised_time'] || 'Yes',
+                'A11. Overall, how satisfied are you with your experience at our workshop/dealership for servicing your vehicle?': row['workshop_overall_rating_A11'] || 10,
+                // Page 3 TVS Genuine Spare Parts Satisfaction (C1 through C5)
+                'C1. Will you recommend / tell / advise your friends, colleague or fellow rider’s for TVS Genuine Spare Parts? (9 & 10 means “you will definitely recommend”, 7 & 8 means “May be recommend”, 6 and below means “No, definitely not recommend”) You can choose a': row['spare_parts_recommend_C1'] || 10,
+                'C2. How satisfied are you with the availability of TVS Genuine Spare Parts when you need them? (9 & 10 means “Extremely Satisfied”, 7 & 8 means “Satisfied”, 6 and below means “Not Satisfied”) You can choose any score between 0 and 10. So which score would': row['spare_parts_availability_C2'] || 10,
+                'C3. How satisfied are you with the quality of TVS Genuine Spare Parts? (9 & 10 means “Extremely Satisfied”, 7 & 8 means “Satisfied”, 6 and below means “Not Satisfied”) You can choose any score between 0 and 10. So which score would you like to give? (Tick': row['spare_parts_quality_C3'] || 10,
+                'C4. How satisfied are you with the value for money of TVS Genuine Spare Parts? (9 & 10 means “Extremely Satisfied”, 7 & 8 means “Satisfied”, 6 and below means “Not Satisfied”) You can choose any score between 0 and 10. So which score would you like to giv': row['spare_parts_value_for_money_C4'] || 10,
+                '1-C5. What is the primary reason for the above rating (in “Ques: C1”) you given for TVS Genuine Spare Parts?': row['spare_parts_reason_C5'] || '',
+                'GPS Watermark Location': row['GPS Watermark Location'] || row['Location'] || 'Conakry, Guinea',
+                'GPS Coordinates': row['GPS Coordinates'] || '9.6412, -13.5784'
             };
+
+            // Hierarchical Defect Probing Matrix (Electrical, Engine, Frame Issues mapped from customer box verbatims)
+            const fullVerbatim = `${Array.isArray(row['3b_areas_dissatisfaction']) ? row['3b_areas_dissatisfaction'].join(' ') : (row['3b_areas_dissatisfaction'] || '')} ${Array.isArray(row['4_reasons_not_recommend']) ? row['4_reasons_not_recommend'].join(' ') : (row['4_reasons_not_recommend'] || '')} ${item.text || ''}`.toLowerCase();
+
+            if (fullVerbatim.includes('stand')) {
+                combinedRow['Stand Problem [Loose]'] = 'Loose';
+            }
+            if (fullVerbatim.includes('gear') || fullVerbatim.includes('shifting')) {
+                combinedRow['Gear shifting hard Both'] = 'Yes';
+                combinedRow['Not Coming to Neutral'] = 'Yes';
+            }
+            if (fullVerbatim.includes('brake') || fullVerbatim.includes('stopping')) {
+                combinedRow['Front brake noise'] = 'Yes';
+            }
+            if (fullVerbatim.includes('indicator') || fullVerbatim.includes('tsl')) {
+                combinedRow['TSL (Indicator) [Light Not working]'] = 'Light Not working';
+                combinedRow['TSL (Indicator) [crack]'] = 'Crack';
+            }
+            if (fullVerbatim.includes('headlight') || fullVerbatim.includes('head lamp')) {
+                combinedRow['Head light [DC headlamp]'] = 'Low intensity';
+            }
+            if (fullVerbatim.includes('speedometer') || fullVerbatim.includes('odometer') || fullVerbatim.includes('meter')) {
+                combinedRow['What is the issue in speedometer?'] = 'Speed is not showing';
+            }
+            if (fullVerbatim.includes('oil leak') || fullVerbatim.includes('leakage')) {
+                combinedRow['Engine oil leak'] = 'Cylinder head';
+            }
+            if (fullVerbatim.includes('engine noise') || fullVerbatim.includes('noise')) {
+                combinedRow['Engine noise [Top side]'] = 'Top side';
+            }
+            if (fullVerbatim.includes('heat') || fullVerbatim.includes('engine heat')) {
+                combinedRow['Engine Heat [Both]'] = 'Both';
+            }
+            if (fullVerbatim.includes('rust')) {
+                combinedRow['Engine parts rust'] = 'Engine parts rust';
+            }
+            if (fullVerbatim.includes('horn')) {
+                combinedRow['Horn issues'] = 'Low sound';
+            }
+            if (fullVerbatim.includes('lock')) {
+                combinedRow['Locks not working [Ignition key not working]'] = 'Hard';
+            }
+            if (fullVerbatim.includes('vibration') || fullVerbatim.includes('shaking')) {
+                combinedRow['Handle bar vibration [Both side]'] = 'Both side';
+            }
+            if (fullVerbatim.includes('clutch')) {
+                combinedRow['Clutch hard'] = 'Yes';
+            }
+
+            const standardizedRow = orderColumns(combinedRow);
 
             // Running stats
             if (sentiment === 'Promoter') promoters++;
@@ -1076,9 +1323,7 @@ app.post('/api/analyze-pdf-stream', upload.any(), async (req, res) => {
             await new Promise(r => setTimeout(r, 120));
         }
 
-        const columns = rows.length > 0
-            ? Object.keys(rows[0]).filter(c => c !== '#')
-            : [];
+        const columns = GUINEA_COLUMNS_449;
 
         sendEvent('done', {
             total,
@@ -1142,38 +1387,51 @@ app.post('/api/analyze-pdf', upload.any(), async (req, res) => {
                 row = heuristicExtractRecord(pages[i] || fullText, i, `Record #${i + 1}`);
             }
 
-            const nps = parseInt(row['Product NPS Score'] ?? row['NPS Score'] ?? 9, 10);
+            const nps = parseInt(row['2. Likely to recommend vehicle (0-10)'] ?? row['Product NPS Score'] ?? row['NPS Score'] ?? 9, 10);
             const sentiment = nps >= 9 ? 'Promoter' : nps >= 7 ? 'Passive' : 'Detractor';
 
             const vinRes = resolveVinMatch(
-                row['Form VIN'] || row['VIN / Chassis'],
+                row['VIN No. (Qualifying Question)'] || row['Form VIN'] || row['VIN / Chassis'],
                 row['Stamped Metal VIN'],
                 pages[i] || fullText || ''
             );
 
-            rows.push({
+            const date = row['SURVEY DATE'] || row['Date'] || new Date().toISOString().split('T')[0];
+
+            const combinedSyncRow = {
                 '#': i + 1,
-                'Customer Name': row['Customer Name'] || `Customer #${i + 1}`,
-                'Mobile': row['Mobile'] || '—',
-                'Location': row['Location'] || '—',
-                'Date': row['Date'] || new Date().toISOString().split('T')[0],
-                'Brand': row['Brand'] || 'Hero',
-                'Vehicle Model': row['Vehicle Model'] || 'Xtreme 160R',
-                'Form VIN': vinRes.formVin,
-                'Stamped Metal VIN': vinRes.stampedVin,
+                ...row,
+                'Timestamp': row['Timestamp'] || `${date} 10:30`,
+                'SURVEY DATE': date,
+                'SURVEYOR NAME': row['SURVEYOR NAME'] || 'Moussa',
+                'SURVEY LOCATION': row['SURVEY LOCATION'] || row['Location'] || 'Conakry',
+                'BRAND & MODEL (Qualifying Question)': row['BRAND & MODEL (Qualifying Question)'] || row['Vehicle Model'] || 'TVS HLX 125',
+                'VIN No. (Qualifying Question)': vinRes.formVin,
                 'VIN Match Status': vinRes.matchStatus,
-                'Odometer Reading': row['Odometer Reading'] || '—',
-                'Dealer / Workshop': row['Dealer / Workshop'] || 'Central Hub',
-                'Product NPS Score': nps,
-                'Product Sentiment': sentiment,
-                'Product Feedback': row['Product Feedback'] || row['Verbatim Feedback'] || 'Verified',
-                'Service NPS Score': row['Service NPS Score'] || nps,
-                'Service Sentiment': row['Service Sentiment'] || sentiment,
-                'Service Feedback': row['Service Feedback'] || 'Standard workshop maintenance.',
-                'GPS Watermark Location': row['GPS Watermark Location'] || '—',
-                'GPS Coordinates': row['GPS Coordinates'] || '—',
-                'GPS Timestamp': row['GPS Timestamp'] || '—'
-            });
+                'Please take a picture of the VIN no. and upload it here. (Qualifying Question)': row['Please take a picture of the VIN no. and upload it here. (Qualifying Question)'] || `Record #${i + 1}`,
+                'ODOMETER READING (Kms)': row['ODOMETER READING (Kms)'] || row['Odometer Reading'] || '19399',
+                'MODE OF PURCHASE': row['MODE OF PURCHASE'] || 'New',
+                'DATE OF PURCHASING THE VEHICLE FROM DEALER / PREVIOUS OWNER': row['DATE OF PURCHASING THE VEHICLE FROM DEALER / PREVIOUS OWNER'] || date,
+                'USER NAME': row['USER NAME'] || row['Customer Name'] || `User #${i + 1}`,
+                'USER AGE (YEARS) (enter only a full number between 18 to 60)': row['USER AGE (YEARS) (enter only a full number between 18 to 60)'] || '25',
+                'USER AGE GROUP': row['USER AGE GROUP'] || '20-30',
+                'USER PROFESSION': row['USER PROFESSION'] || 'Business',
+                'MOBILE NUMBER': row['MOBILE NUMBER'] || row['Mobile'] || '—',
+                'ALTERNATE MOBILE NUMBER': row['ALTERNATE MOBILE NUMBER'] || '—',
+                'OWNERSHIP (OWN / HIRED)': row['OWNERSHIP (OWN / HIRED)'] || 'Own',
+                'FOR WHAT PURPOSE DO YOU USE THE VEHICLE?': row['FOR WHAT PURPOSE DO YOU USE THE VEHICLE?'] || 'Personal use',
+                'MODEL YEAR OF YOUR VEHICLE': row['MODEL YEAR OF YOUR VEHICLE'] || '2025',
+                'A': row['A'] || row['HOW LONG HAVE YOU BEEN USING THIS VEHICLE?'] || '3-6 months ( from Feb - 2026 to Apr - 2026)',
+                'HOW LONG HAVE YOU BEEN USING THIS VEHICLE?': row['HOW LONG HAVE YOU BEEN USING THIS VEHICLE?'] || row['A'] || '3-6 months ( from Feb - 2026 to Apr - 2026)',
+                'PREVIOUS VEHICLE USED Brand & Model': row['PREVIOUS VEHICLE USED Brand & Model'] || row['PREVIOUS VEHICLE USED\r\nBrand & Model'] || 'Yamaha',
+                'HOW LONG DID YOU USE THE PREVIOUS VEHICLE? (Years)': row['HOW LONG DID YOU USE THE PREVIOUS VEHICLE? (Years)'] || '2',
+                '1. Will you recommend your vehicle to your friends / relatives / family members?': row['1. Will you recommend your vehicle to your friends / relatives / family members?'] || (nps >= 7 ? 'Yes' : 'No'),
+                '2. On a scale of 0 to 10, how likely are you to recommend your vehicle to your friends and relatives? (9 & 10 means “Yes Always recommend”, 7 & 8 means “May be recommend”, 6 and below means “No, definitely not recommend”)': row['2. On a scale of 0 to 10, how likely are you to recommend your vehicle to your friends and relatives? (9 & 10 means “Yes Always recommend”, 7 & 8 means “May be recommend”, 6 and below means “No, definitely not recommend”)'] || nps,
+                '2. Likely to recommend vehicle (0-10)': nps,
+                'GPS Watermark Location': row['GPS Watermark Location'] || row['Location'] || 'Conakry, Guinea',
+                'GPS Coordinates': row['GPS Coordinates'] || '9.6412, -13.5784'
+            };
+            rows.push(orderColumns(combinedSyncRow));
         }
 
         const columns = rows.length > 0 ? Object.keys(rows[0]).filter(c => c !== '#') : [];

@@ -51,3 +51,5 @@ backend/uploads/
 portal/dist/
 portal/node_modules_trash/
 
+# Scratch
+scratch/
