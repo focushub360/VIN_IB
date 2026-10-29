@@ -8,7 +8,9 @@ node_modules/
 dist/
 web-build/
 expo-env.d.ts
-
+.env
+.env.*
+!.env.example
 # Native
 .kotlin/
 *.orig.*
@@ -46,6 +48,9 @@ app-example
 backend/.env
 backend/database.sqlite
 backend/uploads/
+service-account.json
+backend/service-account.json
+*.json.key
 
 # Portal
 portal/dist/
@@ -53,3 +58,4 @@ portal/node_modules_trash/
 
 # Scratch
 scratch/
+

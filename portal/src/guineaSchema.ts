@@ -2294,8 +2294,21 @@ export function orderRowColumns(row: Record<string, any>): Record<string, any> {
   const remainingKeys = new Set(Object.keys(row));
 
   // First place keys according to 449 schema
-  for (const col of GUINEA_COLUMNS_449) {
-    if (col in row) {
+  for (let i = 0; i < GUINEA_COLUMNS_449.length; i++) {
+    const col = GUINEA_COLUMNS_449[i];
+    const letter = GUINEA_COLUMN_DEFS[i]?.letter;
+
+    // Check if value is provided under column name or under Excel letter (e.g. 'DF', 'EP')
+    let val = row[col];
+    if ((val === undefined || val === '') && letter && row[letter] !== undefined && row[letter] !== '') {
+      val = row[letter];
+      remainingKeys.delete(letter);
+    }
+
+    if (val !== undefined && val !== '') {
+      ordered[col] = val;
+      remainingKeys.delete(col);
+    } else if (col in row) {
       ordered[col] = row[col];
       remainingKeys.delete(col);
     } else if (col === 'A' && 'HOW LONG HAVE YOU BEEN USING THIS VEHICLE?' in row) {
@@ -2304,6 +2317,14 @@ export function orderRowColumns(row: Record<string, any>): Record<string, any> {
     } else if (col === 'HOW LONG HAVE YOU BEEN USING THIS VEHICLE?' && 'A' in row) {
       ordered[col] = row['A'];
       remainingKeys.delete('A');
+    } else {
+      ordered[col] = '';
+    }
+
+    // Mirror to letter key as well so lookups by letter always succeed
+    if (letter) {
+      ordered[letter] = (val !== undefined && val !== '') ? val : (row[letter] !== undefined ? row[letter] : ordered[col]);
+      remainingKeys.delete(letter);
     }
   }
 

@@ -1,31 +1,34 @@
 import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import * as XLSX from 'xlsx';
-import { 
-    ScanLine, 
-    ShieldCheck, 
-    ClipboardList, 
-    BarChart3, 
-    Download, 
-    UploadCloud, 
-    Play, 
-    Pause, 
-    FileSpreadsheet, 
-    CheckCircle2, 
-    XCircle, 
-    AlertTriangle, 
-    Clock, 
-    MapPin, 
-    Search, 
-    SlidersHorizontal, 
+import {
+    ScanLine,
+    ShieldCheck,
+    ClipboardList,
+    BarChart3,
+    Download,
+    UploadCloud,
+    Play,
+    Pause,
+    FileSpreadsheet,
+    CheckCircle2,
+    XCircle,
+    AlertTriangle,
+    Clock,
+    MapPin,
+    Search,
+    SlidersHorizontal,
     LogOut,
     Sparkles,
     Check,
-    Layers
+    Layers,
+    Database
 } from 'lucide-react';
 import { API_URL } from './api';
 import './Dashboard.css';
 import NpsAnalyzer from './NpsAnalyzer';
+import QcDataCheck from './QcDataCheck';
+import DataSources from './DataSources';
 
 interface GeoLocationData {
     latitude?: string;
@@ -59,7 +62,7 @@ const AdminDashboard: React.FC = () => {
     const [questIsLoading, setQuestIsLoading] = useState(false);
     const [questError, setQuestError] = useState<string>('');
     const [questCurrentPage, setQuestCurrentPage] = useState(1);
-    const [editingCell, setEditingCell] = useState<{rowIndex: number, colName: string} | null>(null);
+    const [editingCell, setEditingCell] = useState<{ rowIndex: number, colName: string } | null>(null);
 
     const [valData, setValData] = useState<any[]>([]);
     const [valColumns, setValColumns] = useState<string[]>([]);
@@ -69,9 +72,11 @@ const AdminDashboard: React.FC = () => {
     const [valCurrentPage, setValCurrentPage] = useState(1);
     const [valSearchText, setValSearchText] = useState('');
 
+
+
     const handleValDownload = () => {
-        const filteredData = valData.filter(row => 
-            Object.values(row).some(val => 
+        const filteredData = valData.filter(row =>
+            Object.values(row).some(val =>
                 String(val).toLowerCase().includes(valSearchText.toLowerCase())
             )
         );
@@ -279,7 +284,7 @@ const AdminDashboard: React.FC = () => {
         XLSX.utils.book_append_sheet(wb, ws, "Questionnaire_Hierarchy");
         XLSX.writeFile(wb, "Questionnaire_TGW_Template.xlsx");
     };
-    
+
     /*
     const BRAKE_HIERARCHY: any = {
         "Front brake noise": { L4: ["Moring time only", "All time brake noise"], L5: null },
@@ -300,7 +305,7 @@ const AdminDashboard: React.FC = () => {
         let isRejected = false;
 
         const brakeKey = columns.find(c => c.toLowerCase().trim() === 'brake') || 'Brake';
-        
+
         const cleanCell = (v: any) => v === undefined || v === null ? '' : String(v).replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
         const brakeVal = cleanCell(rowObj[brakeKey]);
 
@@ -347,107 +352,107 @@ const AdminDashboard: React.FC = () => {
         setQuestError('');
         setQuestData([]);
         setQuestCurrentPage(1);
-        
+
         // Use a short timeout to let the UI render the loading state before parsing blocks the thread
         setTimeout(() => {
             const reader = new FileReader();
             reader.onload = (evt) => {
                 const bstr = evt.target?.result;
-            const wb = XLSX.read(bstr, { type: 'binary' });
-            const wsname = wb.SheetNames[0];
-            const ws = wb.Sheets[wsname];
-            
-            const dataArrays: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1 });
-            if (dataArrays && dataArrays.length > 0) {
-                // Find the row with the most columns to treat as the header
-                let maxLen = 0;
-                let headerIndex = 0;
-                for (let i = 0; i < Math.min(15, dataArrays.length); i++) {
-                    const rowArr = dataArrays[i] || [];
-                    const nonBlankCount = rowArr.filter(cell => cell !== undefined && cell !== null && String(cell).trim() !== '').length;
-                    if (nonBlankCount > maxLen) {
-                        maxLen = nonBlankCount;
-                        headerIndex = i;
+                const wb = XLSX.read(bstr, { type: 'binary' });
+                const wsname = wb.SheetNames[0];
+                const ws = wb.Sheets[wsname];
+
+                const dataArrays: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1 });
+                if (dataArrays && dataArrays.length > 0) {
+                    // Find the row with the most columns to treat as the header
+                    let maxLen = 0;
+                    let headerIndex = 0;
+                    for (let i = 0; i < Math.min(15, dataArrays.length); i++) {
+                        const rowArr = dataArrays[i] || [];
+                        const nonBlankCount = rowArr.filter(cell => cell !== undefined && cell !== null && String(cell).trim() !== '').length;
+                        if (nonBlankCount > maxLen) {
+                            maxLen = nonBlankCount;
+                            headerIndex = i;
+                        }
                     }
-                }
-                
-                const headers = dataArrays[headerIndex] || [];
-                // Generate safe column names
-                const cols = headers.map((h: any, idx: number) => {
-                    const str = h !== undefined && h !== null ? String(h).trim() : '';
-                    return str ? str : `Column_${idx + 1}`;
-                });
-                
-                // If there are duplicate column names, append index to make them unique
-                const uniqueCols = cols.map((col, idx) => {
-                    if (cols.indexOf(col) !== idx) return `${col}_${idx}`;
-                    return col;
-                });
-                
-                // Format Validation: Ensure this is actually the Questionnaire mapping file
-                const isCorrectFormat = uniqueCols.some(col => 
-                    col.toLowerCase().includes('complaint') || 
-                    col.toLowerCase().includes('probing') || 
-                    col.toLowerCase().includes('l2') || 
-                    col.toLowerCase().includes('l3')
-                );
 
-                if (!isCorrectFormat) {
-                    setQuestError("Invalid File Format: Please upload the correct NPS TGW Buckets questionnaire template. The file must contain columns like 'Complaint group (L2)' or 'Sub Complaint (L3)'.");
-                    setQuestIsLoading(false);
-                    return;
-                }
-
-                const rows = dataArrays.slice(headerIndex + 1).map(row => {
-                    const rowObj: any = {};
-                    uniqueCols.forEach((col: string, idx: number) => {
-                        const val = row[idx];
-                        rowObj[col] = val !== undefined && val !== null ? String(val) : '';
+                    const headers = dataArrays[headerIndex] || [];
+                    // Generate safe column names
+                    const cols = headers.map((h: any, idx: number) => {
+                        const str = h !== undefined && h !== null ? String(h).trim() : '';
+                        return str ? str : `Column_${idx + 1}`;
                     });
-                    return rowObj;
-                });
-                
-                // Find where the TGW matrix starts to insert the Status columns
-                const lowerCols = uniqueCols.map(c => c.toLowerCase().trim());
-                let originalSplitIndex = lowerCols.findIndex(c => c === 'brake' || c === 'electrical' || c === 'engine');
-                
-                if (originalSplitIndex !== -1) {
-                    uniqueCols.splice(originalSplitIndex, 0, 'Accepted', 'Rejected');
-                } else {
-                    uniqueCols.unshift('Accepted', 'Rejected');
-                }
-                
-                // Run validation to populate Status columns
-                rows.forEach(r => {
-                    const matrixStart = originalSplitIndex !== -1 ? originalSplitIndex + 2 : 2;
-                    const v = validateRowData(r, uniqueCols, matrixStart);
-                    r['Accepted'] = v.Accepted;
-                    r['Rejected'] = v.Rejected;
-                });
 
-                setQuestColumns([...uniqueCols]);
-                
-                const colVisInit: Record<string, boolean> = {};
-                const newSplitIndex = uniqueCols.indexOf('Accepted');
-                
-                uniqueCols.forEach((c, idx) => { 
-                    if (newSplitIndex !== -1) {
-                        // Uncheck everything before the status columns, check everything from status columns onwards
-                        colVisInit[c] = idx >= newSplitIndex;
-                    } else {
-                        colVisInit[c] = true;
+                    // If there are duplicate column names, append index to make them unique
+                    const uniqueCols = cols.map((col, idx) => {
+                        if (cols.indexOf(col) !== idx) return `${col}_${idx}`;
+                        return col;
+                    });
+
+                    // Format Validation: Ensure this is actually the Questionnaire mapping file
+                    const isCorrectFormat = uniqueCols.some(col =>
+                        col.toLowerCase().includes('complaint') ||
+                        col.toLowerCase().includes('probing') ||
+                        col.toLowerCase().includes('l2') ||
+                        col.toLowerCase().includes('l3')
+                    );
+
+                    if (!isCorrectFormat) {
+                        setQuestError("Invalid File Format: Please upload the correct NPS TGW Buckets questionnaire template. The file must contain columns like 'Complaint group (L2)' or 'Sub Complaint (L3)'.");
+                        setQuestIsLoading(false);
+                        return;
                     }
-                });
-                
-                setQuestVisibleCols(colVisInit);
-                
-                // Filter out rows that are entirely blank (ignoring the synthetic columns)
-                const filteredRows = rows.filter(r => uniqueCols.some(col => col !== 'Accepted' && col !== 'Rejected' && String(r[col]).trim() !== ''));
-                setQuestData(filteredRows);
-            }
-            setQuestIsLoading(false);
-        };
-        reader.readAsBinaryString(file);
+
+                    const rows = dataArrays.slice(headerIndex + 1).map(row => {
+                        const rowObj: any = {};
+                        uniqueCols.forEach((col: string, idx: number) => {
+                            const val = row[idx];
+                            rowObj[col] = val !== undefined && val !== null ? String(val) : '';
+                        });
+                        return rowObj;
+                    });
+
+                    // Find where the TGW matrix starts to insert the Status columns
+                    const lowerCols = uniqueCols.map(c => c.toLowerCase().trim());
+                    let originalSplitIndex = lowerCols.findIndex(c => c === 'brake' || c === 'electrical' || c === 'engine');
+
+                    if (originalSplitIndex !== -1) {
+                        uniqueCols.splice(originalSplitIndex, 0, 'Accepted', 'Rejected');
+                    } else {
+                        uniqueCols.unshift('Accepted', 'Rejected');
+                    }
+
+                    // Run validation to populate Status columns
+                    rows.forEach(r => {
+                        const matrixStart = originalSplitIndex !== -1 ? originalSplitIndex + 2 : 2;
+                        const v = validateRowData(r, uniqueCols, matrixStart);
+                        r['Accepted'] = v.Accepted;
+                        r['Rejected'] = v.Rejected;
+                    });
+
+                    setQuestColumns([...uniqueCols]);
+
+                    const colVisInit: Record<string, boolean> = {};
+                    const newSplitIndex = uniqueCols.indexOf('Accepted');
+
+                    uniqueCols.forEach((c, idx) => {
+                        if (newSplitIndex !== -1) {
+                            // Uncheck everything before the status columns, check everything from status columns onwards
+                            colVisInit[c] = idx >= newSplitIndex;
+                        } else {
+                            colVisInit[c] = true;
+                        }
+                    });
+
+                    setQuestVisibleCols(colVisInit);
+
+                    // Filter out rows that are entirely blank (ignoring the synthetic columns)
+                    const filteredRows = rows.filter(r => uniqueCols.some(col => col !== 'Accepted' && col !== 'Rejected' && String(r[col]).trim() !== ''));
+                    setQuestData(filteredRows);
+                }
+                setQuestIsLoading(false);
+            };
+            reader.readAsBinaryString(file);
         }, 50);
     };
 
@@ -462,26 +467,26 @@ const AdminDashboard: React.FC = () => {
             reader.onload = (evt) => {
                 const bstr = evt.target?.result;
                 const wb = XLSX.read(bstr, { type: 'binary' });
-                
+
                 const wsname = wb.SheetNames[0];
                 const ws = wb.Sheets[wsname];
-                
+
                 const dataArrays = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' }) as any[][];
-                
+
                 if (dataArrays.length > 0) {
                     const headers = dataArrays[0] || [];
                     const cols = headers.map((h, idx) => {
                         const str = h !== undefined && h !== null ? String(h).trim() : '';
                         return str ? str : `Column_${idx + 1}`;
                     });
-                    
+
                     const uniqueCols = cols.map((col, idx) => {
                         if (cols.indexOf(col) !== idx) return `${col}_${idx}`;
                         return col;
                     });
 
                     let finalCols = [...uniqueCols];
-                    
+
                     // Check if there are any columns that look like a VIN column
                     const vinCols = uniqueCols.filter(c => {
                         const lower = c.toLowerCase();
@@ -520,14 +525,14 @@ const AdminDashboard: React.FC = () => {
                             const val = row[idx];
                             rowObj[col] = val !== undefined && val !== null ? String(val).trim() : '';
                         });
-                        
+
                         if (vinCols.length > 0) {
                             const vin = rowObj[vinCols[0]];
                             if (vin && vin.length >= 12) {
                                 const yCode = vin.charAt(9);
                                 const pCode = vin.charAt(10);
                                 const mCode = vin.charAt(11);
-                                
+
                                 rowObj['Extracted Year'] = YEAR_CODE_MAP[yCode] ? `${yCode} (${YEAR_CODE_MAP[yCode]})` : yCode;
                                 rowObj['Extracted Plant'] = PLANT_CODE_MAP[pCode] ? `${pCode} (${PLANT_CODE_MAP[pCode]})` : pCode;
                                 rowObj['Extracted Month'] = MONTH_CODE_MAP[mCode] ? `${mCode} (${MONTH_CODE_MAP[mCode]})` : mCode;
@@ -539,9 +544,9 @@ const AdminDashboard: React.FC = () => {
                         }
                         return rowObj;
                     });
-                    
+
                     setValColumns(finalCols);
-                    
+
                     const colVisInit: Record<string, boolean> = {};
 
                     if (vinCols.length > 0) {
@@ -551,9 +556,9 @@ const AdminDashboard: React.FC = () => {
                     } else {
                         finalCols.forEach(c => colVisInit[c] = true);
                     }
-                    
+
                     setValVisibleCols(colVisInit);
-                    
+
                     const filteredRows = rows.filter(r => uniqueCols.some(col => String(r[col]).trim() !== ''));
                     setValData(filteredRows);
                 }
@@ -571,18 +576,18 @@ const AdminDashboard: React.FC = () => {
         setIsProcessing(false);
         setIsPaused(false);
         setProgress(0);
-        stopProcessingRef.current = true; 
+        stopProcessingRef.current = true;
 
         const reader = new FileReader();
         reader.onload = (evt) => {
             const bstr = evt.target?.result;
             const wb = XLSX.read(bstr, { type: 'binary' });
-            
+
             const wsname = wb.SheetNames[0];
             const ws = wb.Sheets[wsname];
-            
+
             const data = XLSX.utils.sheet_to_json(ws) as ProcessedRow[];
-            
+
             if (data.length > 0) {
                 setOriginalColumns(Object.keys(data[0]));
             } else {
@@ -596,7 +601,7 @@ const AdminDashboard: React.FC = () => {
                 isMatch: '-',
                 status: 'Pending' as const
             }));
-            
+
             setExcelData(initializedData);
         };
         reader.readAsBinaryString(file);
@@ -651,7 +656,7 @@ const AdminDashboard: React.FC = () => {
             const task = (async (index) => {
                 const vinCol = originalColumns[0];
                 const linkCol = originalColumns[1];
-                
+
                 setExcelData(prev => {
                     const updated = [...prev];
                     updated[index] = { ...updated[index], status: 'Processing' };
@@ -681,16 +686,16 @@ const AdminDashboard: React.FC = () => {
                         body: JSON.stringify({ driveLink, expectedVin })
                     });
                     const result = await response.json();
-                    
+
                     setExcelData(prev => {
                         const updated = [...prev];
                         if (response.ok) {
-                            updated[index] = { 
-                                ...updated[index], 
+                            updated[index] = {
+                                ...updated[index],
                                 extractedVin: result.extractedVin || 'No text found',
                                 geoLocation: result.geoLocation || null,
-                                isMatch: result.isMatch ? 'Match' : 'Mismatch', 
-                                status: 'Complete' 
+                                isMatch: result.isMatch ? 'Match' : 'Mismatch',
+                                status: 'Complete'
                             };
                         } else {
                             updated[index] = { ...updated[index], extractedVin: 'Error API', isMatch: 'Error', status: 'Error' };
@@ -712,10 +717,10 @@ const AdminDashboard: React.FC = () => {
 
             tasks.push(task);
         }
-        
+
         // Wait for all remaining tasks to finish
         await Promise.all(tasks);
-        
+
         setIsProcessing(false);
         setIsPaused(false);
     };
@@ -752,19 +757,19 @@ const AdminDashboard: React.FC = () => {
 
     return (
         <div className="dashboard-layout">
-            
+
             {/* Glossy Modern Header */}
             <header className="glossy-header">
                 <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-                    <img 
-                        src="/assets/focus_logo.png" 
-                        alt="Focus Engineering Logo" 
-                        style={{ 
-                            height: "46px", 
-                            width: "auto", 
+                    <img
+                        src="/assets/focus_logo.png"
+                        alt="Focus Engineering Logo"
+                        style={{
+                            height: "46px",
+                            width: "auto",
                             objectFit: "contain",
                             display: "block"
-                        }} 
+                        }}
                     />
                     <div style={{ width: "1px", height: "32px", background: "rgba(226, 232, 240, 0.9)" }} />
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
@@ -782,14 +787,14 @@ const AdminDashboard: React.FC = () => {
                         </span>
                     </div>
                 </div>
-                <button 
-                    onClick={handleLogout} 
+                <button
+                    onClick={handleLogout}
                     className="modern-btn"
-                    style={{ 
-                        background: '#fef2f2', 
-                        border: '1px solid rgba(254, 202, 202, 0.8)', 
-                        color: '#dc2626', 
-                        padding: '8px 16px', 
+                    style={{
+                        background: '#fef2f2',
+                        border: '1px solid rgba(254, 202, 202, 0.8)',
+                        color: '#dc2626',
+                        padding: '8px 16px',
                         fontSize: '13px',
                         borderRadius: '10px',
                         boxShadow: '0 1px 3px rgba(220, 38, 38, 0.08)'
@@ -809,7 +814,9 @@ const AdminDashboard: React.FC = () => {
                         { name: 'VIN_IB Inspector', icon: <ScanLine size={16} /> },
                         { name: 'Validator', icon: <ShieldCheck size={16} /> },
                         { name: 'Questionnaire Validation', icon: <ClipboardList size={16} /> },
-                        { name: 'AI Data Entry', icon: <Sparkles size={16} /> }
+                        { name: 'QC Data Check', icon: <ShieldCheck size={16} /> },
+                        { name: 'AI Data Entry', icon: <Sparkles size={16} /> },
+                        { name: 'Data Sources', icon: <Database size={16} /> }
                     ].map(({ name, icon }) => (
                         <button
                             key={name}
@@ -824,13 +831,17 @@ const AdminDashboard: React.FC = () => {
             </div>
 
             <main style={{
-                padding: activeTab === 'AI Data Entry' ? '14px 18px' : '28px 36px',
-                maxWidth: activeTab === 'AI Data Entry' ? '100%' : '1600px',
+                padding: (activeTab === 'AI Data Entry' || activeTab === 'QC Data Check' || activeTab === 'Data Sources')
+                    ? '14px 18px'
+                    : '28px 36px',
+                maxWidth: (activeTab === 'AI Data Entry' || activeTab === 'QC Data Check' || activeTab === 'Data Sources')
+                    ? '100%'
+                    : '1600px',
                 margin: '0 auto',
                 width: '100%',
                 boxSizing: 'border-box'
             }}>
-                
+
                 {activeTab === 'VIN_IB Inspector' && (
                     <>
                         {/* Upload Dropzone Card */}
@@ -922,208 +933,208 @@ const AdminDashboard: React.FC = () => {
                             </div>
                         )}
 
-                {/* Data Table Section */}
-                {excelData.length > 0 && (
-                    <div className="glass-panel" style={{ 
-                        overflow: 'hidden',
-                        display: 'flex',
-                        flexDirection: 'column'
-                    }}>
-                        
-                        {/* Action Bar */}
-                        <div style={{ 
-                            padding: '20px 28px', 
-                            borderBottom: '1px solid rgba(226, 232, 240, 0.9)',
-                            background: '#f8fafc',
-                            display: 'flex', 
-                            justifyContent: 'space-between', 
-                            alignItems: 'center', 
-                            flexWrap: 'wrap', 
-                            gap: '16px' 
-                        }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
-                                <div>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                        <FileSpreadsheet size={18} color="#2563eb" />
-                                        <span style={{ fontSize: '15.5px', fontWeight: 700, color: '#0f172a' }}>{fileName}</span>
+                        {/* Data Table Section */}
+                        {excelData.length > 0 && (
+                            <div className="glass-panel" style={{
+                                overflow: 'hidden',
+                                display: 'flex',
+                                flexDirection: 'column'
+                            }}>
+
+                                {/* Action Bar */}
+                                <div style={{
+                                    padding: '20px 28px',
+                                    borderBottom: '1px solid rgba(226, 232, 240, 0.9)',
+                                    background: '#f8fafc',
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    flexWrap: 'wrap',
+                                    gap: '16px'
+                                }}>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
+                                        <div>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                                <FileSpreadsheet size={18} color="#2563eb" />
+                                                <span style={{ fontSize: '15.5px', fontWeight: 700, color: '#0f172a' }}>{fileName}</span>
+                                            </div>
+                                            <div style={{ display: 'flex', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
+                                                <span className="modern-stat-chip total">
+                                                    <Layers size={13} /> {excelData.length} Total
+                                                </span>
+                                                <span className="modern-stat-chip match">
+                                                    <CheckCircle2 size={13} /> {matchCount} Match
+                                                </span>
+                                                <span className="modern-stat-chip mismatch">
+                                                    <XCircle size={13} /> {mismatchCount} Mismatch
+                                                </span>
+                                                <span className="modern-stat-chip done">
+                                                    <Check size={13} /> {completedCount}/{excelData.length} Done
+                                                </span>
+                                            </div>
+                                        </div>
+
+                                        {/* Progress Bar */}
+                                        <div style={{ width: '220px', marginLeft: '10px' }}>
+                                            <div style={{ background: '#e2e8f0', borderRadius: '999px', height: '8px', overflow: 'hidden' }}>
+                                                <div style={{
+                                                    width: `${progress}%`,
+                                                    background: 'linear-gradient(90deg, #3b82f6, #2563eb)',
+                                                    height: '100%',
+                                                    transition: 'width 0.3s ease',
+                                                    borderRadius: '999px'
+                                                }}></div>
+                                            </div>
+                                            <span style={{ fontSize: '11.5px', fontWeight: 600, color: 'var(--color-text-muted)', marginTop: '4px', display: 'block', textAlign: 'right' }}>{progress}% Complete</span>
+                                        </div>
                                     </div>
-                                    <div style={{ display: 'flex', gap: '8px', marginTop: '10px', flexWrap: 'wrap' }}>
-                                        <span className="modern-stat-chip total">
-                                            <Layers size={13} /> {excelData.length} Total
-                                        </span>
-                                        <span className="modern-stat-chip match">
-                                            <CheckCircle2 size={13} /> {matchCount} Match
-                                        </span>
-                                        <span className="modern-stat-chip mismatch">
-                                            <XCircle size={13} /> {mismatchCount} Mismatch
-                                        </span>
-                                        <span className="modern-stat-chip done">
-                                            <Check size={13} /> {completedCount}/{excelData.length} Done
-                                        </span>
+
+                                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+                                        {!isProcessing || isPaused ? (
+                                            <button
+                                                onClick={processImages}
+                                                className="modern-btn modern-btn-primary"
+                                            >
+                                                <Play size={15} />
+                                                {progress > 0 && progress < 100 ? 'Resume' : 'Start Validation'}
+                                            </button>
+                                        ) : (
+                                            <button
+                                                onClick={togglePause}
+                                                className="modern-btn"
+                                                style={{ background: '#f59e0b', color: '#fff', boxShadow: '0 4px 12px rgba(245, 158, 11, 0.25)' }}
+                                            >
+                                                <Pause size={15} />
+                                                Pause
+                                            </button>
+                                        )}
+
+                                        <button
+                                            onClick={handleExport}
+                                            disabled={completedCount === 0}
+                                            className="modern-btn modern-btn-success"
+                                            style={{ opacity: completedCount === 0 ? 0.5 : 1, cursor: completedCount === 0 ? 'not-allowed' : 'pointer' }}
+                                        >
+                                            <Download size={15} />
+                                            Export Excel
+                                        </button>
                                     </div>
                                 </div>
-                                
-                                {/* Progress Bar */}
-                                <div style={{ width: '220px', marginLeft: '10px' }}>
-                                    <div style={{ background: '#e2e8f0', borderRadius: '999px', height: '8px', overflow: 'hidden' }}>
-                                        <div style={{ 
-                                            width: `${progress}%`, 
-                                            background: 'linear-gradient(90deg, #3b82f6, #2563eb)', 
-                                            height: '100%', 
-                                            transition: 'width 0.3s ease',
-                                            borderRadius: '999px'
-                                        }}></div>
-                                    </div>
-                                    <span style={{ fontSize: '11.5px', fontWeight: 600, color: 'var(--color-text-muted)', marginTop: '4px', display: 'block', textAlign: 'right' }}>{progress}% Complete</span>
-                                </div>
-                            </div>
-                            
-                            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
-                                {!isProcessing || isPaused ? (
-                                    <button 
-                                        onClick={processImages} 
-                                        className="modern-btn modern-btn-primary"
-                                    >
-                                        <Play size={15} />
-                                        {progress > 0 && progress < 100 ? 'Resume' : 'Start Validation'}
-                                    </button>
-                                ) : (
-                                    <button 
-                                        onClick={togglePause} 
-                                        className="modern-btn"
-                                        style={{ background: '#f59e0b', color: '#fff', boxShadow: '0 4px 12px rgba(245, 158, 11, 0.25)' }}
-                                    >
-                                        <Pause size={15} />
-                                        Pause
-                                    </button>
-                                )}
-                                
-                                <button 
-                                    onClick={handleExport}
-                                    disabled={completedCount === 0}
-                                    className="modern-btn modern-btn-success"
-                                    style={{ opacity: completedCount === 0 ? 0.5 : 1, cursor: completedCount === 0 ? 'not-allowed' : 'pointer' }}
-                                >
-                                    <Download size={15} />
-                                    Export Excel
-                                </button>
-                            </div>
-                        </div>
-                        
-                        {/* Table */}
-                        <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 'calc(100vh - 300px)', WebkitOverflowScrolling: 'touch', width: '100%' }}>
-                            <table className="modern-table">
-                                <thead>
-                                    <tr>
-                                        <th style={{ width: '50px' }}>#</th>
-                                        {originalColumns.map((col) => (
-                                            <th key={col}>{col}</th>
-                                        ))}
-                                        <th>Extracted VIN</th>
-                                        <th>Geo Location</th>
-                                        <th>Match Status</th>
-                                        <th>Status</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {excelData.map((row, index) => {
-                                        const geo = row.geoLocation;
-                                        return (
-                                            <tr key={index}>
-                                                <td style={{ color: 'var(--color-text-muted)', fontWeight: 500 }}>{index + 1}</td>
-                                                {originalColumns.map((col) => {
-                                                    const value = row[col];
-                                                    const isValidDrive = isDriveLink(value);
-                                                    return (
-                                                        <td key={col} style={{ maxWidth: '240px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                                            {isValidDrive ? (
-                                                                <a href={value as string} target="_blank" rel="noreferrer" style={{ color: '#2563eb', textDecoration: 'none', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-                                                                    <ScanLine size={14} /> Drive Image
-                                                                </a>
+
+                                {/* Table */}
+                                <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 'calc(100vh - 300px)', WebkitOverflowScrolling: 'touch', width: '100%' }}>
+                                    <table className="modern-table">
+                                        <thead>
+                                            <tr>
+                                                <th style={{ width: '50px' }}>#</th>
+                                                {originalColumns.map((col) => (
+                                                    <th key={col}>{col}</th>
+                                                ))}
+                                                <th>Extracted VIN</th>
+                                                <th>Geo Location</th>
+                                                <th>Match Status</th>
+                                                <th>Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {excelData.map((row, index) => {
+                                                const geo = row.geoLocation;
+                                                return (
+                                                    <tr key={index}>
+                                                        <td style={{ color: 'var(--color-text-muted)', fontWeight: 500 }}>{index + 1}</td>
+                                                        {originalColumns.map((col) => {
+                                                            const value = row[col];
+                                                            const isValidDrive = isDriveLink(value);
+                                                            return (
+                                                                <td key={col} style={{ maxWidth: '240px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                                    {isValidDrive ? (
+                                                                        <a href={value as string} target="_blank" rel="noreferrer" style={{ color: '#2563eb', textDecoration: 'none', fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                                                                            <ScanLine size={14} /> Drive Image
+                                                                        </a>
+                                                                    ) : (
+                                                                        <span className="vin-chip">{value}</span>
+                                                                    )}
+                                                                </td>
+                                                            );
+                                                        })}
+
+                                                        {/* Extracted VIN */}
+                                                        <td>
+                                                            {(() => {
+                                                                const isUnclear = !row.extractedVin || ['-', 'N/A', 'No text found', 'No VIN detected', 'Error API', 'Error Fetch'].includes(row.extractedVin);
+                                                                if (isUnclear) {
+                                                                    return (
+                                                                        <span className="modern-badge modern-badge-danger">
+                                                                            <XCircle size={12} /> Not Clear
+                                                                        </span>
+                                                                    );
+                                                                }
+                                                                return (
+                                                                    <span className="vin-chip" style={{ color: '#0284c7', background: '#f0f9ff', borderColor: '#bae6fd' }}>
+                                                                        {row.extractedVin}
+                                                                    </span>
+                                                                );
+                                                            })()}
+                                                        </td>
+
+                                                        {/* Geo Location */}
+                                                        <td style={{ minWidth: '220px' }}>
+                                                            {geo && (geo.latitude || geo.location || geo.dateTime) ? (
+                                                                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
+                                                                    {geo.latitude && geo.longitude && (
+                                                                        <span style={{ color: '#0284c7', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                                                            <MapPin size={13} /> {geo.latitude}, {geo.longitude}
+                                                                        </span>
+                                                                    )}
+                                                                    {geo.dateTime && (
+                                                                        <span style={{ color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: '5px' }}>
+                                                                            <Clock size={13} /> {geo.dateTime}
+                                                                        </span>
+                                                                    )}
+                                                                    {geo.location && (
+                                                                        <span style={{ color: 'var(--color-text)', maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={geo.location}>
+                                                                            🗺️ {geo.location}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
                                                             ) : (
-                                                                <span className="vin-chip">{value}</span>
+                                                                <span style={{ color: 'var(--color-text-dim)' }}>—</span>
                                                             )}
                                                         </td>
-                                                    );
-                                                })}
-                                                
-                                                {/* Extracted VIN */}
-                                                <td>
-                                                    {(() => {
-                                                        const isUnclear = !row.extractedVin || ['-', 'N/A', 'No text found', 'No VIN detected', 'Error API', 'Error Fetch'].includes(row.extractedVin);
-                                                        if (isUnclear) {
-                                                            return (
+
+                                                        {/* Match */}
+                                                        <td>
+                                                            {row.isMatch === 'Match' ? (
+                                                                <span className="modern-badge modern-badge-success">
+                                                                    <CheckCircle2 size={12} /> MATCH
+                                                                </span>
+                                                            ) : row.isMatch === 'Mismatch' ? (
                                                                 <span className="modern-badge modern-badge-danger">
-                                                                    <XCircle size={12} /> Not Clear
+                                                                    <XCircle size={12} /> MISMATCH
                                                                 </span>
-                                                            );
-                                                        }
-                                                        return (
-                                                            <span className="vin-chip" style={{ color: '#0284c7', background: '#f0f9ff', borderColor: '#bae6fd' }}>
-                                                                {row.extractedVin}
-                                                            </span>
-                                                        );
-                                                    })()}
-                                                </td>
-
-                                                {/* Geo Location */}
-                                                <td style={{ minWidth: '220px' }}>
-                                                    {geo && (geo.latitude || geo.location || geo.dateTime) ? (
-                                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
-                                                            {geo.latitude && geo.longitude && (
-                                                                <span style={{ color: '#0284c7', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}>
-                                                                    <MapPin size={13} /> {geo.latitude}, {geo.longitude}
+                                                            ) : (
+                                                                <span className="modern-badge modern-badge-warning">
+                                                                    {row.isMatch || '—'}
                                                                 </span>
                                                             )}
-                                                            {geo.dateTime && (
-                                                                <span style={{ color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: '5px' }}>
-                                                                    <Clock size={13} /> {geo.dateTime}
-                                                                </span>
-                                                            )}
-                                                            {geo.location && (
-                                                                <span style={{ color: 'var(--color-text)', maxWidth: '250px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={geo.location}>
-                                                                    🗺️ {geo.location}
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                    ) : (
-                                                        <span style={{ color: 'var(--color-text-dim)' }}>—</span>
-                                                    )}
-                                                </td>
+                                                        </td>
 
-                                                {/* Match */}
-                                                <td>
-                                                    {row.isMatch === 'Match' ? (
-                                                        <span className="modern-badge modern-badge-success">
-                                                            <CheckCircle2 size={12} /> MATCH
-                                                        </span>
-                                                    ) : row.isMatch === 'Mismatch' ? (
-                                                        <span className="modern-badge modern-badge-danger">
-                                                            <XCircle size={12} /> MISMATCH
-                                                        </span>
-                                                    ) : (
-                                                        <span className="modern-badge modern-badge-warning">
-                                                            {row.isMatch || '—'}
-                                                        </span>
-                                                    )}
-                                                </td>
-
-                                                {/* Status */}
-                                                <td>
-                                                    {row.status === 'Processing' && <span style={{ color: '#2563eb', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}><Clock size={14} /> Reading...</span>}
-                                                    {row.status === 'Complete' && <span style={{ color: '#16a34a', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}><CheckCircle2 size={14} /> Done</span>}
-                                                    {row.status === 'Error' && <span style={{ color: '#dc2626', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}><AlertTriangle size={14} /> Error</span>}
-                                                    {row.status === 'Pending' && <span style={{ color: 'var(--color-text-dim)', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '5px' }}><Clock size={14} /> Pending</span>}
-                                                </td>
-                                            </tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                )}
-                </>
+                                                        {/* Status */}
+                                                        <td>
+                                                            {row.status === 'Processing' && <span style={{ color: '#2563eb', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}><Clock size={14} /> Reading...</span>}
+                                                            {row.status === 'Complete' && <span style={{ color: '#16a34a', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}><CheckCircle2 size={14} /> Done</span>}
+                                                            {row.status === 'Error' && <span style={{ color: '#dc2626', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '5px' }}><AlertTriangle size={14} /> Error</span>}
+                                                            {row.status === 'Pending' && <span style={{ color: 'var(--color-text-dim)', fontWeight: 500, display: 'flex', alignItems: 'center', gap: '5px' }}><Clock size={14} /> Pending</span>}
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        )}
+                    </>
                 )}
 
                 {activeTab === 'Validator' && (
@@ -1228,9 +1239,9 @@ const AdminDashboard: React.FC = () => {
                                     {/* Actions */}
                                     <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
                                         <div style={{ position: 'relative' }}>
-                                            <input 
-                                                type="text" 
-                                                placeholder="Search all columns..." 
+                                            <input
+                                                type="text"
+                                                placeholder="Search all columns..."
                                                 value={valSearchText}
                                                 onChange={e => { setValSearchText(e.target.value); setValCurrentPage(1); }}
                                                 style={{
@@ -1248,24 +1259,24 @@ const AdminDashboard: React.FC = () => {
                                             <Search size={15} style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)', color: '#94a3b8' }} />
                                         </div>
 
-                                        <button 
+                                        <button
                                             onClick={handleValDownload}
                                             className="modern-btn modern-btn-success"
                                         >
                                             <Download size={15} />
                                             Export Excel
                                         </button>
-                                        
+
                                         {/* Column Filter Toggle */}
                                         <div style={{ position: 'relative' }}>
-                                            <button 
+                                            <button
                                                 onClick={() => setShowValColumnFilter(!showValColumnFilter)}
                                                 className="modern-btn modern-btn-secondary"
                                             >
                                                 <SlidersHorizontal size={14} />
                                                 Select Columns
                                             </button>
-                                            
+
                                             {showValColumnFilter && (
                                                 <div style={{
                                                     position: 'absolute', top: 'calc(100% + 8px)', right: 0, background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: '8px', boxShadow: 'var(--shadow-lg)', padding: '16px', width: '320px', zIndex: 50, maxHeight: '350px', overflowY: 'auto'
@@ -1273,10 +1284,10 @@ const AdminDashboard: React.FC = () => {
                                                     <h5 style={{ margin: '0 0 16px 0', fontSize: '13px', color: 'var(--color-text)', paddingBottom: '8px', borderBottom: '1px solid var(--color-border)' }}>Visible Columns</h5>
                                                     {valColumns.map(col => (
                                                         <div key={col} style={{ display: 'flex', alignItems: 'flex-start', marginBottom: '10px' }}>
-                                                            <input 
+                                                            <input
                                                                 id={`val-col-chk-${col}`}
-                                                                type="checkbox" 
-                                                                checked={valVisibleCols[col]} 
+                                                                type="checkbox"
+                                                                checked={valVisibleCols[col]}
                                                                 onChange={() => setValVisibleCols(prev => ({ ...prev, [col]: !prev[col] }))}
                                                                 style={{ marginTop: '2px', marginRight: '8px', cursor: 'pointer', width: '16px', height: '16px', flexShrink: 0 }}
                                                             />
@@ -1297,15 +1308,15 @@ const AdminDashboard: React.FC = () => {
                                                 <th style={{ padding: '6px 12px', textAlign: 'left', color: 'var(--color-text)', border: '1px solid var(--color-border-light)', width: '50px' }}>#</th>
                                                 {valColumns.map((col, idx) => (
                                                     valVisibleCols[col] ? (
-                                                        <th key={idx} style={{ 
-                                                            padding: '6px 12px', 
-                                                            textAlign: 'left', 
-                                                            color: col.startsWith('Extracted') ? '#047857' : '#334155', 
+                                                        <th key={idx} style={{
+                                                            padding: '6px 12px',
+                                                            textAlign: 'left',
+                                                            color: col.startsWith('Extracted') ? '#047857' : '#334155',
                                                             background: col.startsWith('Extracted') ? 'rgba(34, 197, 94, 0.12)' : 'transparent',
-                                                            border: '1px solid var(--color-border-light)', 
-                                                            width: col.startsWith('Extracted') ? '120px' : '200px', 
-                                                            overflow: 'hidden', 
-                                                            textOverflow: 'ellipsis' 
+                                                            border: '1px solid var(--color-border-light)',
+                                                            width: col.startsWith('Extracted') ? '120px' : '200px',
+                                                            overflow: 'hidden',
+                                                            textOverflow: 'ellipsis'
                                                         }}>
                                                             {col}
                                                         </th>
@@ -1315,8 +1326,8 @@ const AdminDashboard: React.FC = () => {
                                         </thead>
                                         <tbody>
                                             {(() => {
-                                                const filteredData = valData.filter(row => 
-                                                    Object.values(row).some(val => 
+                                                const filteredData = valData.filter(row =>
+                                                    Object.values(row).some(val =>
                                                         String(val).toLowerCase().includes(valSearchText.toLowerCase())
                                                     )
                                                 );
@@ -1325,15 +1336,15 @@ const AdminDashboard: React.FC = () => {
                                                         <td style={{ padding: '6px 12px', color: 'var(--color-text-muted)', border: '1px solid var(--color-border-light)' }}>{(valCurrentPage - 1) * 50 + i + 1}</td>
                                                         {valColumns.map((col, j) => (
                                                             valVisibleCols[col] ? (
-                                                                <td key={j} style={{ 
-                                                                    padding: '6px 12px', 
-                                                                    color: col.startsWith('Extracted') ? '#065f46' : '#1e293b', 
+                                                                <td key={j} style={{
+                                                                    padding: '6px 12px',
+                                                                    color: col.startsWith('Extracted') ? '#065f46' : '#1e293b',
                                                                     background: col.startsWith('Extracted') ? 'rgba(34, 197, 94, 0.06)' : 'transparent',
                                                                     fontWeight: col.startsWith('Extracted') ? 600 : 400,
-                                                                    whiteSpace: 'nowrap', 
-                                                                    overflow: 'hidden', 
-                                                                    textOverflow: 'ellipsis', 
-                                                                    border: '1px solid var(--color-border-light)' 
+                                                                    whiteSpace: 'nowrap',
+                                                                    overflow: 'hidden',
+                                                                    textOverflow: 'ellipsis',
+                                                                    border: '1px solid var(--color-border-light)'
                                                                 }}>
                                                                     {row[col]}
                                                                 </td>
@@ -1348,8 +1359,8 @@ const AdminDashboard: React.FC = () => {
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 24px', background: 'var(--color-surface-2)', borderTop: '1px solid var(--color-border)', borderBottomLeftRadius: '12px', borderBottomRightRadius: '12px' }}>
                                     <div style={{ color: 'var(--color-text-muted)', fontSize: '13px' }}>
                                         {(() => {
-                                            const filteredData = valData.filter(row => 
-                                                Object.values(row).some(val => 
+                                            const filteredData = valData.filter(row =>
+                                                Object.values(row).some(val =>
                                                     String(val).toLowerCase().includes(valSearchText.toLowerCase())
                                                 )
                                             );
@@ -1357,17 +1368,17 @@ const AdminDashboard: React.FC = () => {
                                         })()}
                                     </div>
                                     <div style={{ display: 'flex', gap: '8px' }}>
-                                        <button 
-                                            disabled={valCurrentPage === 1} 
+                                        <button
+                                            disabled={valCurrentPage === 1}
                                             onClick={() => setValCurrentPage(p => Math.max(1, p - 1))}
                                             style={{ padding: '6px 16px', background: valCurrentPage === 1 ? '#f1f5f9' : '#ffffff', color: valCurrentPage === 1 ? '#94a3b8' : '#0f172a', border: '1px solid var(--color-border-light)', borderRadius: '6px', cursor: valCurrentPage === 1 ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 500, transition: 'all 0.2s' }}
                                         >
                                             Previous
                                         </button>
-                                        <button 
+                                        <button
                                             disabled={(() => {
-                                                const filteredData = valData.filter(row => 
-                                                    Object.values(row).some(val => 
+                                                const filteredData = valData.filter(row =>
+                                                    Object.values(row).some(val =>
                                                         String(val).toLowerCase().includes(valSearchText.toLowerCase())
                                                     )
                                                 );
@@ -1498,17 +1509,17 @@ const AdminDashboard: React.FC = () => {
                                         </div>
                                         <p style={{ color: 'var(--color-text-muted)', fontSize: '12.5px', margin: '4px 0 0 0' }}>All rows and components successfully extracted.</p>
                                     </div>
-                                    
+
                                     {/* Column Filter Toggle */}
                                     <div style={{ position: 'relative' }}>
-                                        <button 
+                                        <button
                                             onClick={() => setShowColumnFilter(!showColumnFilter)}
                                             className="modern-btn modern-btn-secondary"
                                         >
                                             <SlidersHorizontal size={14} />
                                             Select Columns
                                         </button>
-                                        
+
                                         {showColumnFilter && (
                                             <div style={{
                                                 position: 'absolute', top: 'calc(100% + 8px)', right: 0, background: 'var(--color-surface)', border: '1px solid var(--color-border)', borderRadius: '8px', boxShadow: 'var(--shadow-lg)', padding: '16px', width: '320px', zIndex: 50, maxHeight: '350px', overflowY: 'auto'
@@ -1516,10 +1527,10 @@ const AdminDashboard: React.FC = () => {
                                                 <h5 style={{ margin: '0 0 16px 0', fontSize: '13px', color: 'var(--color-text)', paddingBottom: '8px', borderBottom: '1px solid var(--color-border)' }}>Visible Columns</h5>
                                                 {questColumns.map(col => (
                                                     <div key={col} style={{ display: 'flex', alignItems: 'flex-start', marginBottom: '10px' }}>
-                                                        <input 
+                                                        <input
                                                             id={`col-chk-${col}`}
-                                                            type="checkbox" 
-                                                            checked={questVisibleCols[col]} 
+                                                            type="checkbox"
+                                                            checked={questVisibleCols[col]}
                                                             onChange={() => setQuestVisibleCols(prev => ({ ...prev, [col]: !prev[col] }))}
                                                             style={{ marginTop: '2px', marginRight: '8px', cursor: 'pointer', width: '16px', height: '16px', flexShrink: 0 }}
                                                         />
@@ -1556,7 +1567,7 @@ const AdminDashboard: React.FC = () => {
                                                         return questVisibleCols[col] ? (
                                                             <td key={j} id={`cell-${globalRowIdx}-${col.replace(/\s+/g, '-')}`} style={{ padding: '6px 12px', color: 'var(--color-text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', border: '1px solid var(--color-border-light)' }}>
                                                                 {isEditing ? (
-                                                                    <select 
+                                                                    <select
                                                                         autoFocus
                                                                         value={row[col]}
                                                                         onChange={(e) => {
@@ -1578,7 +1589,7 @@ const AdminDashboard: React.FC = () => {
                                                                         <option value="N/A">N/A</option>
                                                                     </select>
                                                                 ) : col === 'Rejected' && row[col] ? (
-                                                                    <button 
+                                                                    <button
                                                                         title={`Missing: ${row[col]}`}
                                                                         onClick={() => {
                                                                             setEditingCell({ rowIndex: globalRowIdx, colName: row[col] });
@@ -1609,15 +1620,15 @@ const AdminDashboard: React.FC = () => {
                                         Showing {(questCurrentPage - 1) * 50 + 1} to {Math.min(questCurrentPage * 50, questData.length)} of {questData.length} records
                                     </div>
                                     <div style={{ display: 'flex', gap: '8px' }}>
-                                        <button 
-                                            disabled={questCurrentPage === 1} 
+                                        <button
+                                            disabled={questCurrentPage === 1}
                                             onClick={() => setQuestCurrentPage(p => Math.max(1, p - 1))}
                                             style={{ padding: '6px 16px', background: questCurrentPage === 1 ? '#f1f5f9' : '#ffffff', color: questCurrentPage === 1 ? '#94a3b8' : '#0f172a', border: '1px solid var(--color-border-light)', borderRadius: '6px', cursor: questCurrentPage === 1 ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 500, transition: 'all 0.2s' }}
                                         >
                                             Previous
                                         </button>
-                                        <button 
-                                            disabled={questCurrentPage === Math.ceil(questData.length / 50) || questData.length === 0} 
+                                        <button
+                                            disabled={questCurrentPage === Math.ceil(questData.length / 50) || questData.length === 0}
                                             onClick={() => setQuestCurrentPage(p => Math.min(Math.ceil(questData.length / 50), p + 1))}
                                             style={{ padding: '6px 16px', background: (questCurrentPage === Math.ceil(questData.length / 50) || questData.length === 0) ? '#f1f5f9' : '#ffffff', color: (questCurrentPage === Math.ceil(questData.length / 50) || questData.length === 0) ? '#94a3b8' : '#0f172a', border: '1px solid var(--color-border-light)', borderRadius: '6px', cursor: (questCurrentPage === Math.ceil(questData.length / 50) || questData.length === 0) ? 'not-allowed' : 'pointer', fontSize: '13px', fontWeight: 500, transition: 'all 0.2s' }}
                                         >
@@ -1630,9 +1641,27 @@ const AdminDashboard: React.FC = () => {
                     </div>
                 )}
 
+                {activeTab === 'QC Data Check' && (
+                    <QcDataCheck onNavigateToDataSources={() => setActiveTab('Data Sources')} />
+                )}
+
                 <div style={{ display: activeTab === 'AI Data Entry' ? 'block' : 'none' }}>
-                    <NpsAnalyzer />
+                    <NpsAnalyzer onNavigateToDataSources={() => setActiveTab('Data Sources')} />
                 </div>
+
+                {activeTab === 'Data Sources' && (
+                    <DataSources
+                        onSelectFileForTab={(tabName, fileId) => {
+                            if (tabName === 'QC Data Check') {
+                                sessionStorage.setItem('activeFile_QC', String(fileId));
+                                setActiveTab('QC Data Check');
+                            } else if (tabName === 'AI Data Entry') {
+                                sessionStorage.setItem('activeFile_NPS', String(fileId));
+                                setActiveTab('AI Data Entry');
+                            }
+                        }}
+                    />
+                )}
 
             </main>
         </div>
