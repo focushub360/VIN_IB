@@ -8,7 +8,8 @@ import {
     getCommonUploads,
     getUploadData,
     uploadCommonFile,
-    updateUploadData
+    updateUploadData,
+    getCustomMasterData
 } from './api';
 import type {
     RegionItem,
@@ -645,6 +646,8 @@ const NpsAnalyzer: React.FC<NpsAnalyzerProps> = ({ onNavigateToDataSources }) =>
     const [filterRegion, setFilterRegion] = useState<string>('all');
     const [filterCountry, setFilterCountry] = useState<string>('all');
     const [filterIbVersion, setFilterIbVersion] = useState<string>('all');
+    const [filterBrandModel, setFilterBrandModel] = useState<string>('all');
+    const [brandModels, setBrandModels] = useState<string[]>([]);
     const [selectedFileId, setSelectedFileId] = useState<string>('');
 
     // Modal state for "Parse New PDF → Save as Common Upload"
@@ -755,12 +758,15 @@ const NpsAnalyzer: React.FC<NpsAnalyzerProps> = ({ onNavigateToDataSources }) =>
         let isMounted = true;
         setIsLoadingFileList(true);
 
-        Promise.all([getRegions(), getIbVersions(), getCommonUploads()])
-            .then(([regs, vers, files]) => {
+        Promise.all([getRegions(), getIbVersions(), getCommonUploads(), getCustomMasterData()])
+            .then(([regs, vers, files, customData]) => {
                 if (!isMounted) return;
                 setRegions(regs);
                 setIbVersions(vers);
                 setCommonFiles(files);
+                if (customData && customData.brandModels) {
+                    setBrandModels(customData.brandModels);
+                }
 
                 // Check if an active file was previously selected or stored in sessionStorage
                 const storedId = sessionStorage.getItem('activeFile_NPS');
@@ -796,15 +802,16 @@ const NpsAnalyzer: React.FC<NpsAnalyzerProps> = ({ onNavigateToDataSources }) =>
         }
     }, [filterRegion, regions]);
 
-    // Filter available common files based on Region, Country, IB Version
+    // Filter available common files based on Region, Country, IB Version, Brand & Model
     const filteredCommonFiles = useMemo(() => {
         return commonFiles.filter(f => {
             if (filterRegion !== 'all' && f.region_name.toLowerCase() !== filterRegion.toLowerCase()) return false;
             if (filterCountry !== 'all' && f.country_name.toLowerCase() !== filterCountry.toLowerCase()) return false;
             if (filterIbVersion !== 'all' && f.ib_version_name.toLowerCase() !== filterIbVersion.toLowerCase()) return false;
+            if (filterBrandModel !== 'all' && (f.brand_model_name || 'General').toLowerCase() !== filterBrandModel.toLowerCase()) return false;
             return true;
         });
-    }, [commonFiles, filterRegion, filterCountry, filterIbVersion]);
+    }, [commonFiles, filterRegion, filterCountry, filterIbVersion, filterBrandModel]);
 
     // Auto-select first matching file when filter changes if current selection is not in list
     useEffect(() => {
@@ -1994,6 +2001,32 @@ const NpsAnalyzer: React.FC<NpsAnalyzerProps> = ({ onNavigateToDataSources }) =>
                             <option value="all">All Versions</option>
                             {ibVersions.map(v => (
                                 <option key={v.id} value={v.name}>{v.name}</option>
+                            ))}
+                        </select>
+                    </div>
+
+                    {/* Brand & Model */}
+                    <div>
+                        <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>
+                            Brand &amp; Model
+                        </label>
+                        <select
+                            value={filterBrandModel}
+                            onChange={e => setFilterBrandModel(e.target.value)}
+                            style={{
+                                width: '100%',
+                                padding: '7px 10px',
+                                borderRadius: '6px',
+                                border: '1px solid #cbd5e1',
+                                background: '#ffffff',
+                                fontSize: '12.5px',
+                                color: '#0f172a',
+                                outline: 'none'
+                            }}
+                        >
+                            <option value="all">All Brands &amp; Models</option>
+                            {brandModels.map(bm => (
+                                <option key={bm} value={bm}>{bm}</option>
                             ))}
                         </select>
                     </div>

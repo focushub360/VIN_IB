@@ -24,8 +24,20 @@ import {
 import { NPS_CELL_OPTIONS } from './npsCellOptions';
 import { QC_FOLLOWUP_OPTIONS } from './shared/QcDropdownTree';
 import { WeightageModal } from './WeightageModal';
-import { POSITIVE_DRIVER_VALUES, applyServiceWeightsToRows } from './weightageHelpers';
+import type { ExistingCounts } from './WeightageModal';
+import {
+    L2_GROUPS,
+    POSITIVE_DRIVERS,
+    SERVICE_POSITIVE_GROUPS,
+    SERVICE_NEGATIVE_GROUPS
+} from './weightageHelpers';
 import type { WeightagePayload } from './weightageHelpers';
+import {
+    WORKSHOP_POSITIVE_L2_TO_COL,
+    WORKSHOP_POSITIVE_L2_TO_L3,
+    WORKSHOP_NEGATIVE_L2_TO_COL,
+    WORKSHOP_NEGATIVE_L2_TO_L3
+} from './shared/workshopDrivers';
 import { getExcelColumnLetter } from './guineaSchema';
 import {
     getRegions,
@@ -33,7 +45,8 @@ import {
     getIbVersions,
     getCommonUploads,
     getUploadData,
-    updateUploadData
+    updateUploadData,
+    getCustomMasterData
 } from './api';
 import type {
     RegionItem,
@@ -41,6 +54,1047 @@ import type {
     IbVersionItem,
     CommonUploadItem
 } from './api';
+import {
+    EXCELLENT_POOLS,
+    MAYBE_POSITIVE_POOLS,
+    MAYBE_DISSATISFACTION_POOLS,
+    DETRACTOR_POOLS
+} from './verbatimPools';
+import { NEGATIVE_TREE, ISSUE_COLUMN_RANGE_MAPPING } from './shared/negativeDetractors';
+import { POSITIVE_DRIVER_L2_TO_L3 } from './positiveDrivers';
+
+/**
+ * Maps an L2 complaint group name → the matching positive driver key used in
+ * POSITIVE_DRIVER_L2_TO_L3. Returns null when there is no topic-relevant
+ * positive driver for this L2 (caller falls back to rating pool).
+ */
+const L2_TO_POSITIVE_DRIVER: Record<string, string> = {
+    'Brake issues': 'Brake',
+    'Electrical issues': 'Electrical',
+    'Engine issues': 'Engine',
+    'Low Mileage': 'Mileage',
+    'Low Speed': 'Vehicle',
+    'Muffler issues': 'Sound',
+    'Suspension issues': 'Suspension',
+    'Vehicle noise': 'Sound',
+    'Vibration': 'Suspension',
+    'Mirror issues': 'Mirror',
+    'Wheel/Tyre issues': 'Tyre',
+    'Battery issues': 'Electrical',
+    'Jerking issues': 'Engine',
+    'Part not available': 'Spare parts',
+    'Pick-up problem': 'Engine',
+    'Running off': 'Engine',
+    'Throttle/Accelerator issue': 'Engine',
+    'Vehicle body parts issue': 'Vehicle',
+    'Fuel related issue': 'Mileage',
+    'Seat issue': 'Seat',
+    'Vehicle Pulling problem': 'Vehicle',
+    'Roof top (soft top) issue': 'Roof top (soft top)'
+};
+
+function pickPositiveForL2(l2: string): string {
+    const key = L2_TO_POSITIVE_DRIVER[l2];
+    if (!key) return '';
+    const pool = POSITIVE_DRIVER_L2_TO_L3[key];
+    if (!Array.isArray(pool) || pool.length === 0) return '';
+    return pool[Math.floor(Math.random() * pool.length)];
+}
+
+const POSITIVE_DRIVER_COLUMNS: Record<string, string> = {
+    'Brake': 'Brake',
+    'Electrical': 'Electrical',
+    'Engine': 'Engine',
+    'Load': 'Load',
+    'Maintenance': 'Maintenance',
+    'Mileage': 'Mileage',
+    'Mirror': 'Mirror',
+    'Vehicle': 'Vehicle',
+    'Seat': 'Seat',
+    'Sound': 'Sound',
+    'Roof top (soft top)': 'Roof top (soft top)',
+    'Spare parts': 'Spare parts',
+    'Style': 'Style',
+    'Suspension': 'Suspension',
+    'Tyre': 'Tyre',
+    'Vehicle price': 'Vehicle price',
+    'Income': 'Income',
+    'Windshield': 'Windshield',
+    'Brand image': 'Brand image'
+};
+
+const PHRASE_TO_DRIVER = new Map<string, string>();
+Object.entries(POSITIVE_DRIVER_L2_TO_L3).forEach(([driver, phrases]) => {
+    (phrases || []).forEach(p => {
+        PHRASE_TO_DRIVER.set(String(p).trim().toLowerCase(), driver);
+    });
+});
+
+function findDriverForPhrase(phrase: string): string | null {
+    if (!phrase) return null;
+    return PHRASE_TO_DRIVER.get(String(phrase).trim().toLowerCase()) || null;
+}
+
+// =============================================================
+// EXACT VERBATIM COLUMN FAMILIES
+// =============================================================
+// AB..AE — product positive (capped at 4, 3a)5 stays empty always)
+const PROD_POS_COLS = [
+    '3a)1 why will you recommend your vehicle?',
+    '3a)2 why will you recommend your vehicle?',
+    '3a)3 why will you recommend your vehicle?',
+    '3a)4 why will you recommend your vehicle?'
+];
+const PROD_POS_COL_5 = '3a)5 why will you recommend your vehicle?';
+
+// AG..AK — product negative (dissatisfaction)
+const PROD_NEG_COLS = [
+    '3b.1. Can you please tell us if there are any areas of dissatisfaction or improvements needed?',
+    '3b. 2. Can you please tell us if there are any areas of dissatisfaction or improvements needed?',
+    '3b. 3. Can you please tell us if there are any areas of dissatisfaction or improvements needed?',
+    '3b. 4. Can you please tell us if there are any areas of dissatisfaction or improvements needed?',
+    '3b. 5. Can you please tell us if there are any areas of dissatisfaction or improvements needed?'
+];
+
+// AN..AR — product "why will you NOT recommend your vehicle"
+const PROD_WHY_NOT_COLS = [
+    '4)1 why will you not recommend your vehicle?',
+    '4)2 why will you not recommend your vehicle?',
+    '4)3 why will you not recommend your vehicle?',
+    '4)4 why will you not recommend your vehicle?',
+    '4)5 why will you not recommend your vehicle?'
+];
+
+// BW..BY — workshop positive
+const WORK_POS_COLS = [
+    '3a)1 Which experience you like the most to recommend Workshop / Dealer?',
+    '3a)2 Which experience you like the most to recommend Workshop / Dealer?',
+    '3a)3 Which experience you like the most to recommend Workshop / Dealer?'
+];
+
+// BZ..CB — workshop soft negative
+const WORK_SOFT_NEG_COLS = [
+    '3b)1 Can you please tell us if there are any expectation or areas of improvement you wish to experience in your workshop visit for Service?',
+    '3b)2 Can you please tell us if there are any expectation or areas of improvement you wish to experience in your workshop visit for Service?',
+    '3b)3 Can you please tell us if there are any expectation or areas of improvement you wish to experience in your workshop visit for Service?'
+];
+
+// CC..CE — workshop hard negative
+const WORK_HARD_NEG_COLS = [
+    '4)1 What are the main reasons for you have not recommend Workshop / Dealer?',
+    '4)2 What are the main reasons for you have not recommend Workshop / Dealer?',
+    '4)3 What are the main reasons for you have not recommend Workshop / Dealer?'
+];
+
+const COL_PRODUCT_REC_W = '1. Will you recommend your vehicle to your friends / relatives / family members?';
+
+const COL_PRODUCT_NPS = '2. On a scale of 0 to 10, how likely are you to recommend your vehicle to your friends and relatives? (9 & 10 means “Yes Always recommend”, 7 & 8 means “May be recommend”, 6 and below means “No, definitely not recommend”)';
+
+const COL_WS_NPS_A2 = 'A2. We have a rating scale from 0 to 10 to understand this better. (9 & 10 means “you will definitely recommend workshop / Dealers to service their vehicle”, 7 & 8 means “May be recommend”, 6 and below means “No, definitely not recommend”) You can choose';
+
+const COL_WS_NPS_A11 = 'A11. Overall, how satisfied are you with your experience at our workshop/dealership for servicing your vehicle? (Please rate your satisfaction on a scale of “0 to 10”)';
+
+const COL_WS_A1 = 'A1. Will you recommend / tell / advise your friends or family members for servicing their vehicle at Authorized Service workshop / Authorized Dealer?';
+
+// The duplicated "A1" and "A2" columns — the sheet uses one of these depending
+// on the region/excel export. Read both, prefer BS (A2) if it's 0-10, then BR (A1).
+const COL_WS_A2 =
+    'A2. We have a rating scale from 0 to 10 to understand this better. (9 & 10 means “you will definitely recommend workshop / Dealers to service their vehicle”, 7 & 8 means “May be recommend”, 6 and below means “No, definitely not recommend”) You can choose any score between 0 and 10. So which score would you like to give?';
+
+// Some exports also carry a name-variation of A1 with "_2" suffix.
+const COL_WS_A1_DUP =
+    'A1. Will you recommend / tell / advise your friends or family members for servicing their vehicle at Authorized Service workshop / Authorized Dealer?_2';
+
+const COL_WS_REC = COL_WS_A1;
+
+function getWorkshopTier(
+    row: Record<string, any>
+): 'positive' | 'negative' | null {
+    // Prefer A2 if it parses as a number 0-10
+    let a2Raw = row[COL_WS_A2];
+    if (a2Raw === undefined || a2Raw === null || String(a2Raw).trim() === '') {
+        a2Raw = row[COL_WS_NPS_A2];
+    }
+    if (a2Raw === undefined || a2Raw === null || String(a2Raw).trim() === '') {
+        const foundKey = Object.keys(row).find(k => /^A2\.\s*we have a rating scale/i.test(k));
+        if (foundKey) a2Raw = row[foundKey];
+    }
+
+    if (a2Raw !== undefined && a2Raw !== null && String(a2Raw).trim() !== '') {
+        // Could be a number or a string like "Yes" / "May be" / "No"
+        const asNum = Number(a2Raw);
+        if (!isNaN(asNum) && asNum >= 0 && asNum <= 10) {
+            return asNum >= 7 ? 'positive' : 'negative';
+        }
+        const asStr = String(a2Raw).trim().toLowerCase();
+        if (asStr === 'yes') return 'positive';
+        if (asStr === 'may be' || asStr === 'maybe' || asStr === 'may be ') return 'positive';
+        if (asStr === 'no') return 'negative';
+    }
+
+    // Fall back to A1 (check both the base name and the _2 variant)
+    const a1Candidates = [row[COL_WS_A1], row[COL_WS_A1_DUP]];
+    for (const raw of a1Candidates) {
+        if (raw === undefined || raw === null) continue;
+        const s = String(raw).trim().toLowerCase();
+        if (!s) continue;
+        if (s === 'yes' || s === 'may be' || s === 'maybe') return 'positive';
+        if (s === 'no') return 'negative';
+    }
+    const foundA1Key = Object.keys(row).find(k => /^A1\.\s*will you recommend/i.test(k));
+    if (foundA1Key) {
+        const s = String(row[foundA1Key] || '').trim().toLowerCase();
+        if (s === 'yes' || s === 'may be' || s === 'maybe') return 'positive';
+        if (s === 'no') return 'negative';
+    }
+
+    // Unknown — skip the row
+    return null;
+}
+
+type ProductRating = 'promoter' | 'passive' | 'detractor';
+
+function readProductRating(row: Record<string, any>): ProductRating {
+    let raw = row[COL_PRODUCT_REC_W];
+    if (raw === undefined || raw === null) {
+        const foundKey = Object.keys(row).find(k => /^1\.\s*will you recommend your vehicle/i.test(k));
+        if (foundKey) raw = row[foundKey];
+    }
+    const val = String(raw || '').trim().toLowerCase();
+    if (val.startsWith('yes')) return 'promoter';
+    if (val.startsWith('may') || val.includes('maybe')) return 'passive';
+    if (val.startsWith('no')) return 'detractor';
+
+    // Fallback: check numeric rating if present
+    const num = readProductNps(row);
+    if (num >= 9) return 'promoter';
+    if (num >= 7) return 'passive';
+    return 'detractor';
+}
+
+function readProductTier(row: Record<string, any>): 'promoter' | 'passive' | 'detractor' | null {
+    return readProductRating(row);
+}
+
+type WorkshopRating = 'yes' | 'no';
+
+function readWorkshopRating(row: Record<string, any>): WorkshopRating {
+    let raw = row[COL_WS_REC];
+    if (raw === undefined || raw === null) {
+        const foundKey = Object.keys(row).find(k => /^A1\.\s*will you recommend/i.test(k));
+        if (foundKey) raw = row[foundKey];
+    }
+    const val = String(raw || '').trim().toLowerCase();
+    if (val.startsWith('no')) return 'no';
+    if (val.startsWith('yes')) return 'yes';
+
+    // Fallback: check numeric A2/A11 or default 'yes'
+    const n = readWorkshopNps(row);
+    return n <= 6 ? 'no' : 'yes';
+}
+
+function readProductNps(row: Record<string, any>): number {
+    const raw =
+        row[COL_PRODUCT_NPS]
+        ?? row['2. Likely to recommend vehicle (0-10)']
+        ?? row['nps_score'];
+    const n = Number(raw);
+    return (!isNaN(n) && n >= 0 && n <= 10) ? n : 9; // default promoter
+}
+
+function readWorkshopNps(row: Record<string, any>): number {
+    const a2 = Number(row[COL_WS_NPS_A2]);
+    if (!isNaN(a2) && a2 >= 0 && a2 <= 10) return a2;
+
+    const a11 = Number(row[COL_WS_NPS_A11]);
+    if (!isNaN(a11) && a11 >= 0 && a11 <= 10) return a11;
+
+    const rec = String(row[COL_WS_REC] || '').trim().toLowerCase();
+    if (rec === 'yes') return 9;
+    if (rec === 'no') return 6;
+    return 9; // default promoter for workshop too
+}
+
+function ensureAutoVerbatimSet(row: Record<string, any>): Set<string> {
+    if (!(row.__autoVerbatim instanceof Set)) {
+        row.__autoVerbatim = new Set<string>();
+    }
+    return row.__autoVerbatim;
+}
+
+function isEmptyCell(v: any): boolean {
+    if (v === undefined || v === null) return true;
+    const s = String(v).trim();
+    return s === '' || /^submit form\.+$/i.test(s);
+}
+
+function fillIfEmpty(row: Record<string, any>, col: string, phrase: string): void {
+    if (!col || !phrase) return;
+    if (!isEmptyCell(row[col])) return;
+    row[col] = phrase;
+    ensureAutoVerbatimSet(row).add(col);
+}
+
+function clearIfAutoFilled(row: Record<string, any>, col: string): void {
+    const set = ensureAutoVerbatimSet(row);
+    if (!set.has(col)) return;
+    row[col] = '';
+    set.delete(col);
+}
+
+// Flatten a Record<string, string[]> or string[][] into a single string[] pool
+function flattenPool(map: Record<string, string[]> | string[][]): string[] {
+    const out: string[] = [];
+    for (const arr of Object.values(map)) {
+        if (Array.isArray(arr)) out.push(...arr);
+    }
+    return out;
+}
+
+// Pick N DISTINCT random phrases from the pool
+function pickDistinct(pool: string[], count: number): string[] {
+    if (pool.length === 0) return [];
+    const copy = [...pool].sort(() => Math.random() - 0.5);
+    const unique = Array.from(new Set(copy));
+    return unique.slice(0, count);
+}
+
+// For Service Negative: Map column name back to the L3 phrase pool
+const WORKSHOP_NEG_COL_TO_L3: Record<string, string[]> = {};
+Object.entries(WORKSHOP_NEGATIVE_L2_TO_COL).forEach(([l2Name, colName]) => {
+    if (colName && WORKSHOP_NEGATIVE_L2_TO_L3[l2Name]) {
+        WORKSHOP_NEG_COL_TO_L3[colName] = WORKSHOP_NEGATIVE_L2_TO_L3[l2Name];
+    }
+});
+
+// For Service Positive: Map column name back to the L3 phrase pool
+const WORKSHOP_POS_COL_TO_L3: Record<string, string[]> = {};
+Object.entries(WORKSHOP_POSITIVE_L2_TO_COL).forEach(([l2Name, colName]) => {
+    if (colName && WORKSHOP_POSITIVE_L2_TO_L3[l2Name]) {
+        WORKSHOP_POS_COL_TO_L3[colName] = WORKSHOP_POSITIVE_L2_TO_L3[l2Name];
+    }
+});
+
+// Map Positive Driver columns (AU..BM) back to their L3 pool
+const PROD_POS_COL_TO_L3: Record<string, string[]> = {};
+Object.entries(POSITIVE_DRIVER_L2_TO_L3).forEach(([l2Name, l3List]) => {
+    // In product, the column name IS the L2 name (e.g. 'Brake')
+    PROD_POS_COL_TO_L3[l2Name] = l3List;
+});
+
+function fillWorkshopVerbatims(
+    row: Record<string, any>,
+    addedPositive: boolean,
+    addedNegative: boolean
+): void {
+    const tier = getWorkshopTier(row);
+    if (tier === null) return;
+
+    // Helper: Find which driver columns actually have values in this row
+    const getFilledDrivers = (driverMap: Record<string, string>) => {
+        const filled: { col: string; phrase: string }[] = [];
+        for (const [l2, colName] of Object.entries(driverMap)) {
+            if (!isEmptyCell(row[colName])) {
+                filled.push({ col: colName, phrase: String(row[colName]) });
+            }
+        }
+        return filled;
+    };
+
+    // 1. Positive Input (Fill 3a from POSITIVE driver columns)
+    if (addedPositive && !addedNegative && tier === 'positive') {
+        const filledPosDrivers = getFilledDrivers(WORKSHOP_POSITIVE_L2_TO_COL);
+        const empty3a = WORK_POS_COLS.filter(c => isEmptyCell(row[c]));
+
+        for (let i = 0; i < empty3a.length && i < filledPosDrivers.length; i++) {
+            row[empty3a[i]] = filledPosDrivers[i].phrase;
+            ensureAutoVerbatimSet(row).add(empty3a[i]);
+        }
+    }
+
+    // 2. Negative Input (Fill 3b OR 4a from NEGATIVE driver columns)
+    if (addedNegative && !addedPositive) {
+        const filledNegDrivers = getFilledDrivers(WORKSHOP_NEGATIVE_L2_TO_COL);
+
+        if (tier === 'positive') {
+            // Yes/Maybe -> Fill 3b ONLY
+            const empty3b = WORK_SOFT_NEG_COLS.filter(c => isEmptyCell(row[c]));
+            for (let i = 0; i < empty3b.length && i < filledNegDrivers.length; i++) {
+                row[empty3b[i]] = filledNegDrivers[i].phrase;
+                ensureAutoVerbatimSet(row).add(empty3b[i]);
+            }
+        } else if (tier === 'negative') {
+            // No -> Fill 4a ONLY
+            const empty4a = WORK_HARD_NEG_COLS.filter(c => isEmptyCell(row[c]));
+            for (let i = 0; i < empty4a.length && i < filledNegDrivers.length; i++) {
+                row[empty4a[i]] = filledNegDrivers[i].phrase;
+                ensureAutoVerbatimSet(row).add(empty4a[i]);
+            }
+        }
+    }
+
+    // 3. Safety Cleanup (same as before)
+    if (tier === 'positive') {
+        for (const col of WORK_HARD_NEG_COLS) {
+            if (ensureAutoVerbatimSet(row).has(col)) {
+                row[col] = '';
+                ensureAutoVerbatimSet(row).delete(col);
+            }
+        }
+    } else if (tier === 'negative') {
+        for (const col of [...WORK_POS_COLS, ...WORK_SOFT_NEG_COLS]) {
+            if (ensureAutoVerbatimSet(row).has(col)) {
+                row[col] = '';
+                ensureAutoVerbatimSet(row).delete(col);
+            }
+        }
+    }
+}
+
+function fillProductVerbatims(
+    row: Record<string, any>,
+    addedPositive: boolean,
+    addedNegative: boolean,
+    l2SlotCols?: string[]
+): void {
+    const productTier = readProductTier(row);
+    if (productTier === null) return;
+
+    const getFilledDrivers = (colList: string[], isPositive: boolean) => {
+        const filled: { col: string; phrase: string }[] = [];
+        for (const col of colList) {
+            if (!isEmptyCell(row[col])) {
+                filled.push({ col, phrase: String(row[col]) });
+            }
+        }
+        return filled;
+    };
+
+    // 1. Positive Input (Fill 3a from Positive Driver columns AU..BM)
+    if (addedPositive && !addedNegative && (productTier === 'promoter' || productTier === 'passive')) {
+        const posDriverCols = Object.keys(POSITIVE_DRIVER_L2_TO_L3);
+        const filledPos = getFilledDrivers(posDriverCols, true);
+        const empty3a = PROD_POS_COLS.filter(c => isEmptyCell(row[c]));
+
+        for (let i = 0; i < empty3a.length && i < filledPos.length; i++) {
+            row[empty3a[i]] = filledPos[i].phrase;
+            ensureAutoVerbatimSet(row).add(empty3a[i]);
+        }
+    }
+
+    // 2. Negative Input (Fill 3b / 4a from L2 slots)
+    if (addedNegative && !addedPositive) {
+        // To get the phrase for 3b, we look at which L2s are present
+        const filledL2s: string[] = [];
+        if (l2SlotCols && l2SlotCols.length > 0) {
+            for (const c of l2SlotCols) {
+                if (!isEmptyCell(row[c])) {
+                    filledL2s.push(String(row[c]).trim());
+                }
+            }
+        } else {
+            for (const v of Object.values(row)) {
+                if (typeof v === 'string' && L2_GROUPS.includes(v.trim())) {
+                    filledL2s.push(v.trim());
+                }
+            }
+        }
+
+        // Get 1 phrase per filled L2
+        const negPhrases: string[] = [];
+        const usedSet = new Set<string>();
+        for (const l2 of filledL2s) {
+            const phrase = pickPhraseForL2(l2, usedSet);
+            if (phrase) {
+                negPhrases.push(phrase);
+                usedSet.add(phrase.toLowerCase());
+            } else {
+                const pool = productTier === 'detractor' ? flattenPool(DETRACTOR_POOLS) : flattenPool(MAYBE_DISSATISFACTION_POOLS);
+                if (pool.length > 0) {
+                    const p = pool[Math.floor(Math.random() * pool.length)];
+                    negPhrases.push(p);
+                    usedSet.add(p.toLowerCase());
+                }
+            }
+        }
+
+        if (productTier === 'promoter' || productTier === 'passive') {
+            const empty3b = PROD_NEG_COLS.filter(c => isEmptyCell(row[c]));
+            for (let i = 0; i < empty3b.length && i < negPhrases.length; i++) {
+                row[empty3b[i]] = negPhrases[i];
+                ensureAutoVerbatimSet(row).add(empty3b[i]);
+            }
+        } else if (productTier === 'detractor') {
+            const empty3b = PROD_NEG_COLS.filter(c => isEmptyCell(row[c]));
+            const empty4a = PROD_WHY_NOT_COLS.filter(c => isEmptyCell(row[c]));
+
+            for (let i = 0; i < empty3b.length && i < negPhrases.length; i++) {
+                row[empty3b[i]] = negPhrases[i];
+                ensureAutoVerbatimSet(row).add(empty3b[i]);
+            }
+            for (let i = 0; i < empty4a.length && i < negPhrases.length; i++) {
+                row[empty4a[i]] = negPhrases[i];
+                ensureAutoVerbatimSet(row).add(empty4a[i]);
+            }
+        }
+    }
+
+    // 3. Safety Cleanup (same as before)
+    if (productTier === 'promoter' || productTier === 'passive') {
+        for (const col of PROD_WHY_NOT_COLS) {
+            if (ensureAutoVerbatimSet(row).has(col)) {
+                row[col] = '';
+                ensureAutoVerbatimSet(row).delete(col);
+            }
+        }
+    } else if (productTier === 'detractor') {
+        for (const col of PROD_POS_COLS) {
+            if (ensureAutoVerbatimSet(row).has(col)) {
+                row[col] = '';
+                ensureAutoVerbatimSet(row).delete(col);
+            }
+        }
+    }
+}
+
+/**
+ * Returns true if a phrase reads as a descriptive complaint / improvement
+ * sentence, false if it looks like an enum answer, a number, a short code,
+ * or a position token. This keeps 3b / 4) / 3a cells semantically clean.
+ */
+function isDescriptivePhrase(raw: any): boolean {
+    if (raw === undefined || raw === null) return false;
+    const s = String(raw).trim();
+    if (s.length < 6) return false;
+    if (/^\d+$/.test(s)) return false;
+    if (/^[\d\s.,/+-]+$/.test(s)) return false;
+
+    const lower = s.toLowerCase();
+
+    const REJECT_EXACT = new Set([
+        'yes', 'no', 'ok', 'not ok', 'front', 'rear', 'left', 'right',
+        'lh side', 'rh side', 'both side', 'lh', 'rh', 'both',
+        'daily', 'weekly', 'monthly',
+        'once in a week', 'once in 2 week', '4 times a week',
+        '3 times a week', '2 times a week',
+        'idling', 'constant speed', 'idling speed', 'while running',
+        'cold condition', 'hot condition',
+        'morning time', 'moring time', 'morning time only', 'moring time only',
+        'during long parking',
+        'not starting after driving few km',
+        'front portion', 'middle portion', 'rear portion',
+        'front lh side', 'front rh side', 'front both side',
+        'rear lh side', 'rear rh side', 'rear both side',
+        'rough road', 'plain road', 'gradient road',
+        'exide', 'amron', 'amco', 'tata green',
+        'n-1', '1-2', '2-3', '3-4', '4-5', '5-4', '1-n', '2-1',
+        '3-2', '4-3', '5-4', 'all gears',
+        'less than 1month', '1-3 months', '3-6 months', 'more than 6 months',
+        'all time brake noise'
+    ]);
+    if (REJECT_EXACT.has(lower)) return false;
+
+    if (/morn?ing\s*time/i.test(lower)) return false;
+
+    if (/^(less than|more than|morethan|lessthan)?\s*\d+\s*(kmph|km|kms|km\/l|hours?|months?|days?|kg)$/i.test(lower)) return false;
+    if (/^\d+\s*-\s*\d+\s*(kmph|km|kms|months?|hours?|kg)$/i.test(lower)) return false;
+    if (/^less\s*than\s*\d+\s*(kmph|km|kms|kg)$/i.test(lower)) return false;
+
+    const WHEN_ONLY = /^(morning|morning time|all time|during|while|after|before|idling|constant)\s*(time|condition|speed|running|parking|brake|drive)?\s*(only)?$/i;
+    if (WHEN_ONLY.test(lower)) return false;
+
+    const SIDE_ONLY = /^(front|rear|lh|rh|left|right|both)\s*(side|portion|both)?$/i;
+    if (SIDE_ONLY.test(lower)) return false;
+
+    if (!/[a-z]{4,}/i.test(lower)) return false;
+    return true;
+}
+
+function pickDescriptive(arr: any): string {
+    if (!Array.isArray(arr) || arr.length === 0) return '';
+    const cleaned = arr
+        .map(x => (x == null ? '' : String(x).trim()))
+        .filter(x => x.length > 0 && isDescriptivePhrase(x));
+    const pool = cleaned.length > 0 ? cleaned : arr.map(x => String(x || '').trim()).filter(Boolean);
+    if (pool.length === 0) return '';
+    return pool[Math.floor(Math.random() * pool.length)];
+}
+
+/**
+ * Curated defect vocabulary enhancements for L2 groups where NEGATIVE_TREE has
+ * very short or single-value options (e.g. Cable issues, Chain issue).
+ */
+const EXTRA_L2_DEFECT_PHRASES: Record<string, string[]> = {
+    'Cable issues': [
+        'Clutch cable breakage',
+        'Clutch cable less life',
+        'Clutch cable tight',
+        'Clutch cable loose',
+        'Clutch cable hard to pull',
+        'Brake cable breakage',
+        'Brake cable less life',
+        'Brake cable tight',
+        'Brake cable loose',
+        'Speedo cable breakage',
+        'Speedometer cable broken',
+        'Speedo cable not working',
+        'Cable breakage',
+        'Cable friction sticky'
+    ],
+    'Chain issue': [
+        'Chain noise',
+        'Chain loose',
+        'Chain Tight',
+        'Chain slipping',
+        'Chain sprocket wear',
+        'Drive chain noise',
+        'Chain dry needs lubrication',
+        'Chain slack issue',
+        'Chain case noise',
+        'Chain case damage'
+    ],
+    'Brake issues': [
+        'Front brake noise',
+        'Front brake poor',
+        'Front brake tight',
+        'Rear brake noise',
+        'Rear brake poor',
+        'Rear brake tight',
+        'Hand brake poor',
+        'Hand brake slippage',
+        'hard to apply brake',
+        'Stopping distance is high',
+        'Brake shoe quick wear',
+        'Disc pad quick wear',
+        'Pedal not return',
+        'Pedal play loose',
+        'too soft or spongy brake',
+        'Lever touching accelerator',
+        'Lever play loose',
+        'Lever play tight'
+    ]
+};
+
+/**
+ * Picks ONE phrase for the given L2, ensuring wide defect variety across rows:
+ *   1) Collects item keys, item keywords, combinations, options, and curated phrases from L2's tree
+ *   2) Filters with isDescriptivePhrase to remove enum/speed/time tokens
+ *   3) Prefers phrases not already used in this row (via usedSet)
+ *   4) Falls back gracefully to L2 name if empty
+ */
+function pickPhraseForL2(l2: string, usedSet?: Set<string>): string {
+    const node: any = (NEGATIVE_TREE as any)[l2];
+
+    const allOptions: string[] = [];
+    const push = (val?: any) => {
+        if (!val) return;
+        if (Array.isArray(val)) {
+            for (const s of val) push(s);
+            return;
+        }
+        if (typeof val === 'string') {
+            const trimmed = val.trim();
+            if (trimmed.length > 0) allOptions.push(trimmed);
+        }
+    };
+
+    // Add extra curated defect phrases for this L2 if defined
+    if (EXTRA_L2_DEFECT_PHRASES[l2]) {
+        push(EXTRA_L2_DEFECT_PHRASES[l2]);
+    }
+
+    if (node) {
+        if (node.type === 'named' && node.items) {
+            for (const [itemKey, item] of Object.entries<any>(node.items)) {
+                push(itemKey);
+                push(item?.keywords);
+                push(item?.options);
+                push(item?.L4?.options);
+                push(item?.L5?.options);
+                push(item?.L6?.options);
+
+                // Combine itemKey with L4 options if generic (e.g. "Clutch cable - Cable breakage")
+                if (Array.isArray(item?.L4?.options)) {
+                    for (const opt of item.L4.options) {
+                        if (typeof opt === 'string' && opt.trim().length > 0) {
+                            const trimmedOpt = opt.trim();
+                            if (/morn?ing\s*time/i.test(trimmedOpt)) continue;
+                            if (!trimmedOpt.toLowerCase().includes(itemKey.toLowerCase())) {
+                                push(`${itemKey} ${trimmedOpt}`);
+                            }
+                        }
+                    }
+                }
+            }
+        } else if ((node.type === 'single' || node.type === 'split') && Array.isArray(node.options)) {
+            push(node.keywords);
+            push(node.options);
+            push(node.L4?.options);
+            push(node.L5?.options);
+            push(node.L6?.options);
+        }
+    }
+
+    if (allOptions.length === 0) {
+        return l2;
+    }
+
+    // Filter to descriptive phrases
+    const descriptive = Array.from(new Set(allOptions.filter(isDescriptivePhrase)));
+
+    const pool = descriptive.length > 0 ? descriptive : Array.from(new Set(allOptions));
+
+    // Prefer a phrase not used in this row
+    if (usedSet && usedSet.size > 0) {
+        const fresh = pool.filter(p => !usedSet.has(p.toLowerCase()));
+        if (fresh.length > 0) {
+            return fresh[Math.floor(Math.random() * fresh.length)];
+        }
+    }
+
+    return pool[Math.floor(Math.random() * pool.length)];
+}
+
+function countFilledDrivers(row: Record<string, any>, driverMap: Record<string, string>): number {
+    let count = 0;
+    for (const col of Object.values(driverMap)) {
+        if (!isEmptyCell(row[col])) count++;
+    }
+    return count;
+}
+
+function countFilledVerbatims(row: Record<string, any>, verbatimCols: string[]): number {
+    let count = 0;
+    for (const col of verbatimCols) {
+        if (!isEmptyCell(row[col])) count++;
+    }
+    return count;
+}
+
+function fillColumnsVertically(
+    rows: Record<string, any>[],
+    columnsToFill: string[],
+    requestedCount: number,
+    phraseGenerator: (row: Record<string, any>, colName: string, usedInCol: Set<string>) => string | null,
+    isRowEligible: (row: Record<string, any>) => boolean,
+    onCellFilled?: (row: Record<string, any>, rIdx: number, colName: string, phrase: string) => void
+): number {
+    let fillsDone = 0;
+    const usedPhrasesPerCol = new Map<string, Set<string>>();
+
+    for (let ci = 0; ci < columnsToFill.length; ci++) {
+        if (fillsDone >= requestedCount) break;
+
+        const col = columnsToFill[ci];
+        const usedInCol = new Set<string>();
+        for (let r = 0; r < rows.length; r++) {
+            const v = rows[r][col];
+            if (!isEmptyCell(v)) {
+                usedInCol.add(String(v).trim());
+                usedInCol.add(String(v).trim().toLowerCase());
+            }
+        }
+        usedPhrasesPerCol.set(col, usedInCol);
+
+        for (let r = 0; r < rows.length; r++) {
+            if (fillsDone >= requestedCount) break;
+
+            const row = rows[r];
+            if (!isRowEligible(row)) continue;
+            if (!isEmptyCell(row[col])) continue; // Don't overwrite existing
+
+            // Prevent gaps: if filling a sequence of columns (ci > 0), require previous column to be filled
+            if (ci > 0 && isEmptyCell(row[columnsToFill[ci - 1]])) {
+                continue;
+            }
+
+            // Generate the phrase based on the row's context
+            const phrase = phraseGenerator(row, col, usedInCol);
+            if (phrase) {
+                row[col] = phrase;
+                ensureAutoVerbatimSet(row).add(col);
+                usedInCol.add(phrase.trim());
+                usedInCol.add(phrase.trim().toLowerCase());
+                fillsDone++;
+                if (onCellFilled) {
+                    onCellFilled(row, r, col, phrase);
+                }
+            }
+        }
+    }
+    return fillsDone;
+}
+
+function applyServiceVerbatimsColumnFirst(
+    newRows: Record<string, any>[],
+    addedPosByRow: Set<number>,
+    addedNegByRow: Set<number>
+): void {
+    // 1. Positive Verbatims (3a)1..3)
+    fillColumnsVertically(
+        newRows,
+        WORK_POS_COLS,
+        999999,
+        (row, col, usedInCol) => {
+            const usedInRow = new Set(WORK_POS_COLS.map(c => String(row[c] || '').trim().toLowerCase()));
+            let matchedPhrase = '';
+            for (const driverCol of Object.values(WORKSHOP_POSITIVE_L2_TO_COL)) {
+                const cellVal = row[driverCol];
+                if (!isEmptyCell(cellVal)) {
+                    const strVal = String(cellVal).trim();
+                    if (!usedInCol.has(strVal) && !usedInCol.has(strVal.toLowerCase()) && !usedInRow.has(strVal.toLowerCase())) {
+                        matchedPhrase = strVal;
+                        break;
+                    }
+                }
+            }
+            if (matchedPhrase) return matchedPhrase;
+            const flatPool = flattenPool(WORKSHOP_POSITIVE_L2_TO_L3);
+            const available = flatPool.filter(p => !usedInCol.has(p) && !usedInCol.has(p.trim().toLowerCase()) && !usedInRow.has(p.trim().toLowerCase()));
+            return available.length > 0
+                ? available[Math.floor(Math.random() * available.length)]
+                : (flatPool.length > 0 ? flatPool[Math.floor(Math.random() * flatPool.length)] : null);
+        },
+        (row) => {
+            if (getWorkshopTier(row) !== 'positive') return false;
+            const rIdx = row.__idx;
+            if (!addedPosByRow.has(rIdx)) return false;
+            const numPosDrivers = countFilledDrivers(row, WORKSHOP_POSITIVE_L2_TO_COL);
+            const filled3a = countFilledVerbatims(row, WORK_POS_COLS);
+            return filled3a < numPosDrivers && filled3a < 3;
+        }
+    );
+
+    // 2. Soft Negative Verbatims (3b)1..3) on Positive tier rows
+    fillColumnsVertically(
+        newRows,
+        WORK_SOFT_NEG_COLS,
+        999999,
+        (row, col, usedInCol) => {
+            const usedInRow = new Set(WORK_SOFT_NEG_COLS.map(c => String(row[c] || '').trim().toLowerCase()));
+            let matchedPhrase = '';
+            for (const driverCol of Object.values(WORKSHOP_NEGATIVE_L2_TO_COL)) {
+                const cellVal = row[driverCol];
+                if (!isEmptyCell(cellVal)) {
+                    const strVal = String(cellVal).trim();
+                    if (!usedInCol.has(strVal) && !usedInCol.has(strVal.toLowerCase()) && !usedInRow.has(strVal.toLowerCase())) {
+                        matchedPhrase = strVal;
+                        break;
+                    }
+                }
+            }
+            if (matchedPhrase) return matchedPhrase;
+            const flatPool = flattenPool(WORKSHOP_NEGATIVE_L2_TO_L3);
+            const available = flatPool.filter(p => !usedInCol.has(p) && !usedInCol.has(p.trim().toLowerCase()) && !usedInRow.has(p.trim().toLowerCase()));
+            return available.length > 0
+                ? available[Math.floor(Math.random() * available.length)]
+                : (flatPool.length > 0 ? flatPool[Math.floor(Math.random() * flatPool.length)] : null);
+        },
+        (row) => {
+            if (getWorkshopTier(row) !== 'positive') return false;
+            const rIdx = row.__idx;
+            if (!addedNegByRow.has(rIdx)) return false;
+            const numNegDrivers = countFilledDrivers(row, WORKSHOP_NEGATIVE_L2_TO_COL);
+            const filled3b = countFilledVerbatims(row, WORK_SOFT_NEG_COLS);
+            return filled3b < numNegDrivers && filled3b < 3;
+        }
+    );
+
+    // 3. Hard Negative Verbatims (4)1..3) on Negative tier rows
+    fillColumnsVertically(
+        newRows,
+        WORK_HARD_NEG_COLS,
+        999999,
+        (row, col, usedInCol) => {
+            const usedInRow = new Set(WORK_HARD_NEG_COLS.map(c => String(row[c] || '').trim().toLowerCase()));
+            let matchedPhrase = '';
+            for (const driverCol of Object.values(WORKSHOP_NEGATIVE_L2_TO_COL)) {
+                const cellVal = row[driverCol];
+                if (!isEmptyCell(cellVal)) {
+                    const strVal = String(cellVal).trim();
+                    if (!usedInCol.has(strVal) && !usedInCol.has(strVal.toLowerCase()) && !usedInRow.has(strVal.toLowerCase())) {
+                        matchedPhrase = strVal;
+                        break;
+                    }
+                }
+            }
+            if (matchedPhrase) return matchedPhrase;
+            const flatPool = flattenPool(WORKSHOP_NEGATIVE_L2_TO_L3);
+            const available = flatPool.filter(p => !usedInCol.has(p) && !usedInCol.has(p.trim().toLowerCase()) && !usedInRow.has(p.trim().toLowerCase()));
+            return available.length > 0
+                ? available[Math.floor(Math.random() * available.length)]
+                : (flatPool.length > 0 ? flatPool[Math.floor(Math.random() * flatPool.length)] : null);
+        },
+        (row) => {
+            if (getWorkshopTier(row) !== 'negative') return false;
+            const rIdx = row.__idx;
+            if (!addedNegByRow.has(rIdx)) return false;
+            const numNegDrivers = countFilledDrivers(row, WORKSHOP_NEGATIVE_L2_TO_COL);
+            const filled4a = countFilledVerbatims(row, WORK_HARD_NEG_COLS);
+            return filled4a < numNegDrivers && filled4a < 3;
+        }
+    );
+}
+
+function applyProductVerbatimsColumnFirst(
+    newRows: Record<string, any>[],
+    addedPosByRow: Set<number>,
+    addedL2sByRow: Map<number, string[]>,
+    l2SlotCols: string[]
+): void {
+    // 1. Positive Product Verbatims (3a)1..4)
+    fillColumnsVertically(
+        newRows,
+        PROD_POS_COLS,
+        999999,
+        (row, col, usedInCol) => {
+            const usedInRow = new Set(PROD_POS_COLS.map(c => String(row[c] || '').trim().toLowerCase()));
+            let matchedPhrase = '';
+            for (const driverCol of Object.values(POSITIVE_DRIVER_COLUMNS)) {
+                const cellVal = row[driverCol];
+                if (!isEmptyCell(cellVal)) {
+                    const strVal = String(cellVal).trim();
+                    if (!usedInCol.has(strVal) && !usedInCol.has(strVal.toLowerCase()) && !usedInRow.has(strVal.toLowerCase())) {
+                        matchedPhrase = strVal;
+                        break;
+                    }
+                }
+            }
+            if (matchedPhrase) return matchedPhrase;
+            const flatPool = flattenPool(POSITIVE_DRIVER_L2_TO_L3);
+            const available = flatPool.filter(p => !usedInCol.has(p) && !usedInCol.has(p.trim().toLowerCase()) && !usedInRow.has(p.trim().toLowerCase()));
+            return available.length > 0
+                ? available[Math.floor(Math.random() * available.length)]
+                : (flatPool.length > 0 ? flatPool[Math.floor(Math.random() * flatPool.length)] : null);
+        },
+        (row) => {
+            const tier = readProductTier(row);
+            if (tier === 'detractor') return false;
+            const rIdx = row.__idx;
+            if (!addedPosByRow.has(rIdx)) return false;
+            const numPosDrivers = countFilledDrivers(row, POSITIVE_DRIVER_COLUMNS);
+            const filled3a = countFilledVerbatims(row, PROD_POS_COLS);
+            return filled3a < numPosDrivers && filled3a < 4;
+        }
+    );
+
+    // 2. Negative Product Verbatims (3b.1..5) for Promoter / Passive
+    fillColumnsVertically(
+        newRows,
+        PROD_NEG_COLS,
+        999999,
+        (row, col, usedInCol) => {
+            const usedInRow = new Set(PROD_NEG_COLS.map(c => String(row[c] || '').trim().toLowerCase()));
+            const rIdx = row.__idx;
+            const addedL2s = addedL2sByRow.get(rIdx) || [];
+            for (const l2 of addedL2s) {
+                const phrase = pickPhraseForL2(l2, usedInCol);
+                if (phrase && !usedInRow.has(phrase.toLowerCase())) {
+                    return phrase;
+                }
+            }
+            const pool = flattenPool(MAYBE_DISSATISFACTION_POOLS);
+            const available = pool.filter(p => !usedInCol.has(p) && !usedInCol.has(p.trim().toLowerCase()) && !usedInRow.has(p.trim().toLowerCase()));
+            return available.length > 0
+                ? available[Math.floor(Math.random() * available.length)]
+                : (pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null);
+        },
+        (row) => {
+            const tier = readProductTier(row);
+            if (tier !== 'promoter' && tier !== 'passive') return false;
+            const rIdx = row.__idx;
+            const addedL2s = addedL2sByRow.get(rIdx) || [];
+            if (addedL2s.length === 0) return false;
+            const filled3b = countFilledVerbatims(row, PROD_NEG_COLS);
+            return filled3b < addedL2s.length && filled3b < 5;
+        }
+    );
+
+    // 3. Negative Product Verbatims (3b.1..5 and 4)1..5) for Detractor
+    fillColumnsVertically(
+        newRows,
+        PROD_NEG_COLS,
+        999999,
+        (row, col, usedInCol) => {
+            const usedInRow = new Set(PROD_NEG_COLS.map(c => String(row[c] || '').trim().toLowerCase()));
+            const rIdx = row.__idx;
+            const addedL2s = addedL2sByRow.get(rIdx) || [];
+            for (const l2 of addedL2s) {
+                const phrase = pickPhraseForL2(l2, usedInCol);
+                if (phrase && !usedInRow.has(phrase.toLowerCase())) {
+                    return phrase;
+                }
+            }
+            const pool = flattenPool(DETRACTOR_POOLS);
+            const available = pool.filter(p => !usedInCol.has(p) && !usedInCol.has(p.trim().toLowerCase()) && !usedInRow.has(p.trim().toLowerCase()));
+            return available.length > 0
+                ? available[Math.floor(Math.random() * available.length)]
+                : (pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null);
+        },
+        (row) => {
+            const tier = readProductTier(row);
+            if (tier !== 'detractor') return false;
+            const rIdx = row.__idx;
+            const addedL2s = addedL2sByRow.get(rIdx) || [];
+            if (addedL2s.length === 0) return false;
+            const filled3b = countFilledVerbatims(row, PROD_NEG_COLS);
+            return filled3b < addedL2s.length && filled3b < 5;
+        }
+    );
+
+    fillColumnsVertically(
+        newRows,
+        PROD_WHY_NOT_COLS,
+        999999,
+        (row, col, usedInCol) => {
+            const usedInRow = new Set(PROD_WHY_NOT_COLS.map(c => String(row[c] || '').trim().toLowerCase()));
+            const rIdx = row.__idx;
+            const addedL2s = addedL2sByRow.get(rIdx) || [];
+            for (const l2 of addedL2s) {
+                const phrase = pickPhraseForL2(l2, usedInCol);
+                if (phrase && !usedInRow.has(phrase.toLowerCase())) {
+                    return phrase;
+                }
+            }
+            const pool = flattenPool(DETRACTOR_POOLS);
+            const available = pool.filter(p => !usedInCol.has(p) && !usedInCol.has(p.trim().toLowerCase()) && !usedInRow.has(p.trim().toLowerCase()));
+            return available.length > 0
+                ? available[Math.floor(Math.random() * available.length)]
+                : (pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null);
+        },
+        (row) => {
+            const tier = readProductTier(row);
+            if (tier !== 'detractor') return false;
+            const rIdx = row.__idx;
+            const addedL2s = addedL2sByRow.get(rIdx) || [];
+            if (addedL2s.length === 0) return false;
+            const filled4a = countFilledVerbatims(row, PROD_WHY_NOT_COLS);
+            return filled4a < addedL2s.length && filled4a < 5;
+        }
+    );
+
+    // 4. Safety Cleanup for Product
+    for (let r = 0; r < newRows.length; r++) {
+        const row = newRows[r];
+        const autoSet = ensureAutoVerbatimSet(row);
+        const tier = readProductTier(row);
+        if (tier === 'promoter' || tier === 'passive') {
+            for (const col of PROD_WHY_NOT_COLS) {
+                if (autoSet.has(col)) {
+                    row[col] = '';
+                    autoSet.delete(col);
+                }
+            }
+        } else if (tier === 'detractor') {
+            for (const col of [...PROD_POS_COLS, PROD_POS_COL_5]) {
+                if (autoSet.has(col)) {
+                    row[col] = '';
+                    autoSet.delete(col);
+                }
+            }
+        }
+    }
+}
 
 
 
@@ -133,22 +1187,180 @@ const findFollowupOptions = (colName: string): string[] | undefined => {
     return NORMALIZED_FOLLOWUP_MAP.get(norm);
 };
 
+/**
+ * Returns the allowed follow-up column names for an L2:
+ *   - Looks up ISSUE_COLUMN_RANGE_MAPPING with trim + case-insensitive matching
+ *   - Excludes the LAST 3 columns of that range (or keeps at least 1 for short ranges)
+ *   - Maps each letter through idxToName so we get real column names
+ * Returns [] if the L2 has no mapping.
+ */
+function getL2FollowUpColumns(
+    l2: string,
+    idxToName: Record<string, string>
+): string[] {
+    if (!l2) return [];
+    const cleanL2 = String(l2).trim();
+
+    // Exact trim+case-insensitive match first
+    let matchedKey = Object.keys(ISSUE_COLUMN_RANGE_MAPPING).find(
+        k => k.trim().toLowerCase() === cleanL2.toLowerCase()
+    );
+    // Fallback: loose substring match
+    if (!matchedKey) {
+        matchedKey = Object.keys(ISSUE_COLUMN_RANGE_MAPPING).find(
+            k => cleanL2.toLowerCase().includes(k.trim().toLowerCase()) ||
+                 k.trim().toLowerCase().includes(cleanL2.toLowerCase())
+        );
+    }
+    if (!matchedKey) return [];
+
+    const range = (ISSUE_COLUMN_RANGE_MAPPING as any)[matchedKey];
+    const startIdx = colLetterToIndex(range.start);
+    const endIdx = colLetterToIndex(range.end);
+
+    const all: string[] = [];
+    for (let i = startIdx; i <= endIdx; i++) {
+        const letter = colIndexToLetter(i);
+        const name = idxToName[letter];
+        if (name) all.push(name);
+    }
+
+    // Exclude the last 3 columns, but always keep at least 1 for short ranges
+    const keepCount = all.length > 3 ? all.length - 3 : Math.min(1, all.length);
+    return all.slice(0, keepCount);
+}
+
+/**
+ * Fills exactly ONE empty follow-up cell for the given L2:
+ *   1. Compute allowed columns via getL2FollowUpColumns (last 3 excluded, min 1)
+ *   2. Filter to empty columns only
+ *   3. Shuffle the empty-column list, then for each, try to pick a valid
+ *      non-empty option from QC_FOLLOWUP_OPTIONS[col] or findFollowupOptions()
+ *   4. Fill the first successful (column, option) pair
+ *   5. Return true if a fill happened, false otherwise
+ * Never overwrites pre-existing values. Records filled cell in __autoVerbatim.
+ */
+function fillOneRandomFollowUpForL2(
+    row: Record<string, any>,
+    l2: string,
+    idxToName: Record<string, string>
+): boolean {
+    if (!l2) return false;
+
+    const allowed = getL2FollowUpColumns(l2, idxToName);
+    if (allowed.length === 0) {
+        console.warn(`[FollowUp] No range mapping found for L2: "${String(l2).trim()}"`);
+        return false;
+    }
+
+    // Empty columns only
+    const emptyCols = allowed.filter(c => isEmptyCell(row[c]));
+    if (emptyCols.length === 0) return false;
+
+    // Shuffle empty columns so we try them in random order
+    const shuffled = [...emptyCols].sort(() => Math.random() - 0.5);
+
+    for (const col of shuffled) {
+        const opts = QC_FOLLOWUP_OPTIONS[col] || findFollowupOptions(col);
+        if (!Array.isArray(opts) || opts.length === 0) continue;
+
+        // Filter to non-empty string options
+        const validOpts = opts.filter(
+            o => typeof o === 'string' && o.trim().length > 0
+        );
+        if (validOpts.length === 0) continue;
+
+        const chosen = validOpts[Math.floor(Math.random() * validOpts.length)];
+        row[col] = chosen;
+        ensureAutoVerbatimSet(row).add(col);
+        return true;
+    }
+
+    return false;
+}
+
 export interface QcIssue {
     l2ColumnName: string;
     l2Value: string;
     followUpRangeLabel: string;
     followUpColNames: string[];
+    isNoL2?: boolean;
 }
 
 export interface QcScanResult {
     issues: QcIssue[];
     ok: boolean;
+    noL2?: boolean;
+    missingGroups: Array<'positive' | 'l2' | 'servicePositive' | 'serviceNegative'>;
+    groupFillCounts: {
+        positive: number;
+        l2: number;
+        servicePositive: number;
+        serviceNegative: number;
+    };
+}
+
+export interface QcGroupColumns {
+    positive: string[];
+    l2: string[];
+    servicePositive: string[];
+    serviceNegative: string[];
+}
+
+export function buildQcGroupColumns(columnNames: string[]): QcGroupColumns {
+    const idxToName: Record<string, string> = {};
+    columnNames.forEach((name, i) => {
+        idxToName[colIndexToLetter(i)] = name;
+    });
+
+    const getColsInRange = (startCol: string, endCol: string): string[] => {
+        const start = colLetterToIndex(startCol);
+        const end = colLetterToIndex(endCol);
+        const cols: string[] = [];
+        for (let i = start; i <= end; i++) {
+            const nm = idxToName[colIndexToLetter(i)];
+            if (nm) cols.push(nm);
+        }
+        return cols;
+    };
+
+    let l2 = getColsInRange('DF', 'EM');
+    if (l2.length === 0) {
+        l2 = columnNames.filter(c => /complaint group \(l2\)/i.test(c));
+    }
+
+    return {
+        positive: getColsInRange('AU', 'BM'),
+        l2,
+        servicePositive: getColsInRange('OK', 'OW'),
+        serviceNegative: getColsInRange('OX', 'PL')
+    };
+}
+
+const QC_GROUP_META: Array<{
+    key: 'positive' | 'l2' | 'servicePositive' | 'serviceNegative';
+    label: string;
+    rangeLabel: string;
+}> = [
+        { key: 'positive', label: 'Positive Drivers', rangeLabel: 'AU..BM' },
+        { key: 'l2', label: 'Complaint Groups (L2)', rangeLabel: 'DF..EM' },
+        { key: 'servicePositive', label: 'Service Positive', rangeLabel: 'OK..OW' },
+        { key: 'serviceNegative', label: 'Service Negative', rangeLabel: 'OX..PL' }
+    ];
+
+function isQcCellFilled(val: any): boolean {
+    if (val === undefined || val === null) return false;
+    const s = String(val).trim();
+    if (!s) return false;
+    if (/^submit form\.+$/i.test(s)) return false;
+    return true;
 }
 
 // Precomputed scan context to avoid rebuilding maps on every single row
 interface QcScanContext {
     l2Cols: string[];
     l2FollowUpMap: Record<string, string[]>;
+    groupColumns: QcGroupColumns;
 }
 
 function buildQcScanContext(columnNames: string[]): QcScanContext {
@@ -157,7 +1369,12 @@ function buildQcScanContext(columnNames: string[]): QcScanContext {
         idxToName[colIndexToLetter(i)] = name;
     });
 
-    const l2Cols = columnNames.filter(c => /complaint group \(l2\)/i.test(c));
+    const groupColumns = buildQcGroupColumns(columnNames);
+
+    let l2Cols = columnNames.filter(c => /complaint group \(l2\)/i.test(c));
+    if (l2Cols.length === 0) {
+        l2Cols = groupColumns.l2;
+    }
 
     const l2FollowUpMap: Record<string, string[]> = {};
     Object.entries(RANGE_LETTERS).forEach(([l2Key, letters]) => {
@@ -169,7 +1386,7 @@ function buildQcScanContext(columnNames: string[]): QcScanContext {
         l2FollowUpMap[l2Key] = cols;
     });
 
-    return { l2Cols, l2FollowUpMap };
+    return { l2Cols, l2FollowUpMap, groupColumns };
 }
 
 function scanRowQcWithContext(
@@ -177,12 +1394,15 @@ function scanRowQcWithContext(
     ctx: QcScanContext
 ): QcScanResult {
     const issues: QcIssue[] = [];
+    let hasAnyL2 = false;
 
     for (const l2Col of ctx.l2Cols) {
         const rawVal = row[l2Col];
         const val = String(rawVal ?? '').trim();
         if (!val) continue;
         if (/^submit form\.+$/i.test(val)) continue;
+
+        hasAnyL2 = true;
 
         const l2Key = L2_NAME_LOOKUP[normalizeL2(val)];
         if (!l2Key) {
@@ -212,7 +1432,52 @@ function scanRowQcWithContext(
         }
     }
 
-    return { issues, ok: issues.length === 0 };
+    // Rows with no Complaint Group (L2) at all fail too
+    if (!hasAnyL2 && ctx.l2Cols.length > 0) {
+        issues.push({
+            l2ColumnName: ctx.l2Cols[0],
+            l2Value: '',
+            followUpRangeLabel: 'L2 Required',
+            followUpColNames: [],
+            isNoL2: true
+        });
+    }
+
+    const groupFillCounts = {
+        positive: 0,
+        l2: 0,
+        servicePositive: 0,
+        serviceNegative: 0
+    };
+
+    if (ctx.groupColumns) {
+        for (const c of ctx.groupColumns.positive) {
+            if (isQcCellFilled(row[c])) groupFillCounts.positive++;
+        }
+        for (const c of ctx.groupColumns.l2) {
+            if (isQcCellFilled(row[c])) groupFillCounts.l2++;
+        }
+        for (const c of ctx.groupColumns.servicePositive) {
+            if (isQcCellFilled(row[c])) groupFillCounts.servicePositive++;
+        }
+        for (const c of ctx.groupColumns.serviceNegative) {
+            if (isQcCellFilled(row[c])) groupFillCounts.serviceNegative++;
+        }
+    }
+
+    const missingGroups: Array<'positive' | 'l2' | 'servicePositive' | 'serviceNegative'> = [];
+    if (groupFillCounts.positive === 0) missingGroups.push('positive');
+    if (groupFillCounts.l2 === 0) missingGroups.push('l2');
+    if (groupFillCounts.servicePositive === 0) missingGroups.push('servicePositive');
+    if (groupFillCounts.serviceNegative === 0) missingGroups.push('serviceNegative');
+
+    return {
+        issues,
+        ok: issues.length === 0,
+        noL2: !hasAnyL2 && ctx.l2Cols.length > 0,
+        missingGroups,
+        groupFillCounts
+    };
 }
 
 interface FlashTarget {
@@ -313,6 +1578,7 @@ interface TableRowProps {
     onJumpBackToBadge: (globalIdx: number) => void;
     onJumpToFirstFollowUp: (globalIdx: number, col: string) => void;
     onJumpBackToL2: (globalIdx: number, col: string) => void;
+    onJumpToGroup: (globalIdx: number, group: 'positive' | 'l2' | 'servicePositive' | 'serviceNegative') => void;
 }
 
 const QcTableRow = React.memo<TableRowProps>(({
@@ -330,7 +1596,8 @@ const QcTableRow = React.memo<TableRowProps>(({
     onJumpToFirstFailingL2,
     onJumpBackToBadge,
     onJumpToFirstFollowUp,
-    onJumpBackToL2
+    onJumpBackToL2,
+    onJumpToGroup
 }) => {
     const badgeFlashing = flashingCol === '__BADGE__';
 
@@ -366,12 +1633,37 @@ const QcTableRow = React.memo<TableRowProps>(({
                     minWidth: '110px'
                 }}
             >
-                {qc.ok ? (
-                    <span className="modern-badge modern-badge-success" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-                        <CheckCircle2 size={12} /> PASS
-                    </span>
-                ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
+                    {qc.ok ? (
+                        <span className="modern-badge modern-badge-success" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            <CheckCircle2 size={12} /> PASS
+                        </span>
+                    ) : qc.noL2 ? (
+                        <button
+                            type="button"
+                            className="modern-badge qc-fail-badge"
+                            onClick={() => onJumpToFirstFailingL2(globalIdx)}
+                            title="Click to jump to Complaint Group (L2) cell.\n\nNo Complaint Group (L2) found in any L2 column for this row."
+                            style={{
+                                border: '1px solid #fb923c',
+                                background: '#ffedd5',
+                                color: '#c2410c',
+                                padding: '3px 8px',
+                                borderRadius: '6px',
+                                fontWeight: 700,
+                                fontSize: '11.5px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '5px',
+                                cursor: 'pointer',
+                                boxShadow: '0 1px 2px rgba(234, 88, 12, 0.15)'
+                            }}
+                        >
+                            <AlertTriangle size={12} />
+                            FAIL (No L2)
+                            <ArrowRight size={11} />
+                        </button>
+                    ) : (
                         <button
                             type="button"
                             className="modern-badge modern-badge-warning qc-fail-badge"
@@ -399,36 +1691,64 @@ const QcTableRow = React.memo<TableRowProps>(({
                             FAIL ({qc.issues.length})
                             <ArrowRight size={11} />
                         </button>
-                        {isFlashTargetThisRow && flashTargetKind !== 'badge' && (
-                            <button
-                                type="button"
-                                onClick={() => onJumpBackToBadge(globalIdx)}
-                                title="Back to FAIL badge"
-                                style={{
-                                    border: '1px dashed #94a3b8',
-                                    background: 'transparent',
-                                    color: '#475569',
-                                    padding: '2px 6px',
-                                    borderRadius: '5px',
-                                    fontSize: '10px',
-                                    fontWeight: 600,
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '3px',
-                                    cursor: 'pointer'
-                                }}
-                            >
-                                <ArrowLeft size={10} /> Back
-                            </button>
-                        )}
+                    )}
+
+                    {/* 4 Category Indicator Dots */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginTop: '4px' }}>
+                        {QC_GROUP_META.map(meta => {
+                            const count = qc.groupFillCounts ? qc.groupFillCounts[meta.key] : 0;
+                            const isFilled = count > 0;
+                            const color = isFilled ? '#16a34a' : '#dc2626';
+                            const title = isFilled
+                                ? `${meta.label} (${meta.rangeLabel}): ${count} ${count === 1 ? 'cell' : 'cells'} filled`
+                                : `${meta.label} (${meta.rangeLabel}): empty`;
+
+                            return (
+                                <span
+                                    key={meta.key}
+                                    title={title}
+                                    className={`qc-indicator-dot ${!isFilled ? 'clickable' : ''}`}
+                                    onClick={!isFilled ? () => onJumpToGroup(globalIdx, meta.key) : undefined}
+                                    style={{
+                                        backgroundColor: color,
+                                        cursor: !isFilled ? 'pointer' : 'default'
+                                    }}
+                                />
+                            );
+                        })}
                     </div>
-                )}
+
+                    {/* Back Button (only when row is being navigated) */}
+                    {!qc.ok && isFlashTargetThisRow && flashTargetKind !== 'badge' && (
+                        <button
+                            type="button"
+                            onClick={() => onJumpBackToBadge(globalIdx)}
+                            title="Back to FAIL badge"
+                            style={{
+                                border: '1px dashed #94a3b8',
+                                background: 'transparent',
+                                color: '#475569',
+                                padding: '2px 6px',
+                                borderRadius: '5px',
+                                fontSize: '10px',
+                                fontWeight: 600,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            <ArrowLeft size={10} /> Back
+                        </button>
+                    )}
+                </div>
             </td>
 
             {/* Data Columns */}
             {visibleColumns.map((col, j) => {
                 const meta = columnMetaMap.get(col);
                 const isL2 = l2Set.has(col);
+                const isNoL2Cell = !!qc.noL2 && isL2;
                 const isMissing = missingSet.has(col);
                 const isFlashing = flashingCol === col;
                 const cellVal = row[col];
@@ -439,7 +1759,10 @@ const QcTableRow = React.memo<TableRowProps>(({
 
                 let bg = '#ffffff';
                 let border = '1px solid #e2e8f0';
-                if (isL2) {
+                if (isNoL2Cell) {
+                    bg = '#fff7ed';
+                    border = '2px dashed #ea580c';
+                } else if (isL2) {
                     bg = '#fed7aa';
                     border = '2px solid #c2410c';
                 } else if (isMissing) {
@@ -448,11 +1771,13 @@ const QcTableRow = React.memo<TableRowProps>(({
                 }
 
                 const cellId = `qc-cell-${globalIdx}-${col}`;
-                const titleSuffix = isL2
-                    ? '\n\n▸ Click arrow or cell to jump to first follow-up column'
-                    : isMissing
-                        ? '\n\n◂ Click arrow or cell to jump back to L2 Complaint group'
-                        : '';
+                const titleSuffix = isNoL2Cell
+                    ? '\n\n▸ Missing Complaint Group (L2) — select a group'
+                    : isL2
+                        ? '\n\n▸ Click arrow or cell to jump to first follow-up column'
+                        : isMissing
+                            ? '\n\n◂ Click arrow or cell to jump back to L2 Complaint group'
+                            : '';
 
                 return (
                     <td
@@ -510,8 +1835,8 @@ const QcTableRow = React.memo<TableRowProps>(({
                                     onChange={(newVal) => onUpdateCell(globalIdx, col, newVal)}
                                 />
 
-                                {/* Frontward Arrow on L2 Complaint cells */}
-                                {isL2 && (
+                                {/* Frontward Arrow on L2 Complaint cells (when L2 is present) */}
+                                {isL2 && !isNoL2Cell && (
                                     <button
                                         type="button"
                                         onClick={(e) => {
@@ -607,6 +1932,63 @@ const QcTableRow = React.memo<TableRowProps>(({
 
 
 
+function computeExistingCounts(rows: Record<string, any>[], columns: string[]): ExistingCounts {
+    const idxToName: Record<string, string> = {};
+    columns.forEach((n, i) => { idxToName[colIndexToLetter(i)] = n; });
+
+    const DF = colLetterToIndex('DF');
+    const EM = colLetterToIndex('EM');
+    const l2SlotCols: string[] = [];
+    for (let i = DF; i <= EM; i++) {
+        const nm = idxToName[colIndexToLetter(i)];
+        if (nm) l2SlotCols.push(nm);
+    }
+
+    const isEmpty = (v: any) =>
+        v === undefined || v === null ||
+        String(v).trim() === '' ||
+        /^submit form\.+$/i.test(String(v));
+
+    const l2: Record<string, number> = {};
+    L2_GROUPS.forEach(g => { l2[g] = 0; });
+    for (const r of rows) {
+        for (const c of l2SlotCols) {
+            const v = r[c];
+            if (isEmpty(v)) continue;
+            const key = String(v).trim();
+            const match = L2_GROUPS.find(g => g.toLowerCase() === key.toLowerCase());
+            if (match) l2[match]++;
+        }
+    }
+
+    const positive: Record<string, number> = {};
+    POSITIVE_DRIVERS.forEach(d => {
+        positive[d] = columns.includes(d)
+            ? rows.reduce((acc, r) => acc + (isEmpty(r[d]) ? 0 : 1), 0)
+            : 0;
+    });
+
+    const servicePositive: Record<string, number> = {};
+    SERVICE_POSITIVE_GROUPS.forEach(name => {
+        const col = WORKSHOP_POSITIVE_L2_TO_COL[name];
+        const targetCol = columns.find(c => c === col) || col;
+        servicePositive[name] = targetCol
+            ? rows.reduce((acc, r) => acc + (isEmpty(r[targetCol]) ? 0 : 1), 0)
+            : 0;
+    });
+
+    const serviceNegative: Record<string, number> = {};
+    SERVICE_NEGATIVE_GROUPS.forEach(name => {
+        const col = WORKSHOP_NEGATIVE_L2_TO_COL[name];
+        const targetCol = columns.find(c => c === col) || col;
+        serviceNegative[name] = targetCol
+            ? rows.reduce((acc, r) => acc + (isEmpty(r[targetCol]) ? 0 : 1), 0)
+            : 0;
+    });
+
+    return { l2, positive, servicePositive, serviceNegative };
+}
+
 interface QcDataCheckProps {
     onNavigateToDataSources?: () => void;
 }
@@ -639,10 +2021,32 @@ const QcDataCheck: React.FC<QcDataCheckProps> = ({ onNavigateToDataSources }) =>
 
 
     const fileInputRef = useRef<HTMLInputElement>(null);
-    const scanContextRef = useRef<QcScanContext>({ l2Cols: [], l2FollowUpMap: {} });
+    const scanContextRef = useRef<QcScanContext>({
+        l2Cols: [],
+        l2FollowUpMap: {},
+        groupColumns: { positive: [], l2: [], servicePositive: [], serviceNegative: [] }
+    });
+    const groupColsRef = useRef<QcGroupColumns>({
+        positive: [],
+        l2: [],
+        servicePositive: [],
+        serviceNegative: []
+    });
     const tableScrollRef = useRef<HTMLDivElement>(null);
 
     const [showWeightModal, setShowWeightModal] = useState(false);
+    const [existingCounts, setExistingCounts] = useState<ExistingCounts>({
+        l2: {},
+        positive: {},
+        servicePositive: {},
+        serviceNegative: {}
+    });
+
+    const handleOpenWeightModal = () => {
+        const counts = computeExistingCounts(rows, columns);
+        setExistingCounts(counts);
+        setShowWeightModal(true);
+    };
 
     // Common Data Sources & Dependent Filter State
     const [regions, setRegions] = useState<RegionItem[]>([]);
@@ -654,6 +2058,8 @@ const QcDataCheck: React.FC<QcDataCheckProps> = ({ onNavigateToDataSources }) =>
     const [filterRegion, setFilterRegion] = useState<string>('all');
     const [filterCountry, setFilterCountry] = useState<string>('all');
     const [filterIbVersion, setFilterIbVersion] = useState<string>('all');
+    const [filterBrandModel, setFilterBrandModel] = useState<string>('all');
+    const [brandModels, setBrandModels] = useState<string[]>([]);
     const [selectedFileId, setSelectedFileId] = useState<string>('');
 
     // Persistence / Dirty State
@@ -776,12 +2182,15 @@ const QcDataCheck: React.FC<QcDataCheckProps> = ({ onNavigateToDataSources }) =>
         let isMounted = true;
         setIsLoadingFileList(true);
 
-        Promise.all([getRegions(), getIbVersions(), getCommonUploads()])
-            .then(([regs, vers, files]) => {
+        Promise.all([getRegions(), getIbVersions(), getCommonUploads(), getCustomMasterData()])
+            .then(([regs, vers, files, customData]) => {
                 if (!isMounted) return;
                 setRegions(regs);
                 setIbVersions(vers);
                 setCommonFiles(files);
+                if (customData && customData.brandModels) {
+                    setBrandModels(customData.brandModels);
+                }
 
                 // Check if an active file was previously selected or stored in sessionStorage
                 const storedId = sessionStorage.getItem('activeFile_QC');
@@ -817,15 +2226,16 @@ const QcDataCheck: React.FC<QcDataCheckProps> = ({ onNavigateToDataSources }) =>
         }
     }, [filterRegion, regions]);
 
-    // Filter available common files based on Region, Country, IB Version
+    // Filter available common files based on Region, Country, IB Version, Brand & Model
     const filteredCommonFiles = useMemo(() => {
         return commonFiles.filter(f => {
             if (filterRegion !== 'all' && f.region_name.toLowerCase() !== filterRegion.toLowerCase()) return false;
             if (filterCountry !== 'all' && f.country_name.toLowerCase() !== filterCountry.toLowerCase()) return false;
             if (filterIbVersion !== 'all' && f.ib_version_name.toLowerCase() !== filterIbVersion.toLowerCase()) return false;
+            if (filterBrandModel !== 'all' && (f.brand_model_name || 'General').toLowerCase() !== filterBrandModel.toLowerCase()) return false;
             return true;
         });
-    }, [commonFiles, filterRegion, filterCountry, filterIbVersion]);
+    }, [commonFiles, filterRegion, filterCountry, filterIbVersion, filterBrandModel]);
 
     // Auto-select first matching file when filter changes if current selection is not in list
     useEffect(() => {
@@ -859,6 +2269,7 @@ const QcDataCheck: React.FC<QcDataCheckProps> = ({ onNavigateToDataSources }) =>
             // Build context ONCE for all rows
             const ctx = buildQcScanContext(loadedCols);
             scanContextRef.current = ctx;
+            groupColsRef.current = ctx.groupColumns;
 
             const scans = loadedRows.map(r => scanRowQcWithContext(r, ctx));
 
@@ -947,6 +2358,7 @@ const QcDataCheck: React.FC<QcDataCheckProps> = ({ onNavigateToDataSources }) =>
                 // Build context ONCE for all rows
                 const ctx = buildQcScanContext(uniqueCols);
                 scanContextRef.current = ctx;
+                groupColsRef.current = ctx.groupColumns;
 
                 const scans = parsedRows.map(r => scanRowQcWithContext(r, ctx));
 
@@ -1167,23 +2579,56 @@ const QcDataCheck: React.FC<QcDataCheckProps> = ({ onNavigateToDataSources }) =>
         });
     }, []);
 
-    const handleExportQcReport = () => {
-        if (rows.length === 0) return;
-        const report = rows.map((row, i) => {
-            const qc = scanResults[i];
-            return {
-                'Row #': i + 1,
-                'QC Status': qc?.ok ? 'PASS' : 'FAIL',
-                'Issues Found': qc?.issues?.length || 0,
-                'L2 Groups Without Follow-up': (qc?.issues || [])
-                    .map(is => `${is.l2ColumnName} = "${is.l2Value}" [expects ${is.followUpRangeLabel}]`)
-                    .join(' | ')
-            };
+    const jumpToGroup = useCallback((rowIdx: number, groupKey: 'positive' | 'l2' | 'servicePositive' | 'serviceNegative') => {
+        const cols = groupColsRef.current[groupKey] || scanContextRef.current?.groupColumns?.[groupKey] || [];
+        if (!cols || cols.length === 0) return;
+        const targetCol = cols[0];
+        setVisibleCols(prev => {
+            if (!prev[targetCol]) {
+                return { ...prev, [targetCol]: true };
+            }
+            return prev;
         });
+        setFlashTarget({
+            rowIdx,
+            colName: targetCol,
+            token: Date.now(),
+            kind: 'followup'
+        });
+    }, []);
+
+    const handleExportQcReport = () => {
+        if (rows.length === 0 || filteredIndices.length === 0) return;
+
+        const exportCols = visibleColumns.length > 0 ? visibleColumns : columns;
+
+        const report = filteredIndices.map((globalIdx) => {
+            const row = rows[globalIdx] || {};
+            const qc = scanResults[globalIdx];
+
+            const exportRow: Record<string, any> = {
+                '#': globalIdx + 1,
+                'QC Status': qc?.ok ? 'PASS' : qc?.noL2 ? 'FAIL (No L2)' : 'FAIL',
+                'QC Issues': qc?.noL2
+                    ? 'No Complaint Group (L2) provided'
+                    : (qc?.issues || [])
+                        .map(is => `${is.l2ColumnName} = "${is.l2Value}" [expects ${is.followUpRangeLabel}]`)
+                        .join(' | ')
+            };
+
+            exportCols.forEach(col => {
+                const cellVal = row[col];
+                exportRow[col] = cellVal !== undefined && cellVal !== null ? cellVal : '';
+            });
+
+            return exportRow;
+        });
+
         const ws = XLSX.utils.json_to_sheet(report);
         const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, 'QC Report');
-        XLSX.writeFile(wb, 'QC_Data_Check_Report.xlsx');
+        XLSX.utils.book_append_sheet(wb, ws, 'QC Data');
+        const cleanName = fileName ? fileName.replace(/\.[^/.]+$/, '') : 'Report';
+        XLSX.writeFile(wb, `QC_Data_Check_${cleanName}.xlsx`);
     };
 
     // Shell style matching AdminDashboard layout
@@ -1206,193 +2651,541 @@ const QcDataCheck: React.FC<QcDataCheckProps> = ({ onNavigateToDataSources }) =>
         };
 
     function scanRowQc(row: Record<string, any>, columnNames: string[]): QcScanResult {
-        const idxToName: Record<string, string> = {};
-        columnNames.forEach((name, i) => {
-            idxToName[colIndexToLetter(i)] = name;
-        });
-
-        const l2Cols = columnNames.filter(c => /complaint group \(l2\)/i.test(c));
-        const issues: QcIssue[] = [];
-
-        for (const l2Col of l2Cols) {
-            const rawVal = row[l2Col];
-            const val = String(rawVal ?? '').trim();
-            if (!val) continue;
-            if (/^submit form\.+$/i.test(val)) continue;
-
-            const l2Key = L2_NAME_LOOKUP[normalizeL2(val)];
-            if (!l2Key) {
-                issues.push({
-                    l2ColumnName: l2Col,
-                    l2Value: val,
-                    followUpRangeLabel: '(unknown)',
-                    followUpColNames: []
-                });
-                continue;
-            }
-
-            const rangeSet = RANGE_LETTERS[l2Key];
-            const followUpColNames: string[] = [];
-            for (const letter of rangeSet) {
-                const nm = idxToName[letter];
-                if (nm) followUpColNames.push(nm);
-            }
-
-            const anyFilled = followUpColNames.some(c => {
-                const v = row[c];
-                return v !== undefined && v !== null && String(v).trim() !== '';
-            });
-
-            if (!anyFilled && followUpColNames.length > 0) {
-                const { start, end } = L2_RANGE[l2Key];
-                issues.push({
-                    l2ColumnName: l2Col,
-                    l2Value: val,
-                    followUpRangeLabel: `${start}..${end}`,
-                    followUpColNames
-                });
-            }
-        }
-
-        return { issues, ok: issues.length === 0 };
+        const ctx = scanContextRef.current && scanContextRef.current.l2Cols.length > 0
+            ? scanContextRef.current
+            : buildQcScanContext(columnNames);
+        return scanRowQcWithContext(row, ctx);
     }
 
     const applyWeights = (payload: WeightagePayload) => {
         const totalRows = rows.length;
         if (totalRows === 0) return;
 
-        if (payload.category === 'service') {
-            const newRows = applyServiceWeightsToRows(rows, columns, payload);
-            const newScans = newRows.map(r => scanRowQc(r, columns));
-            setRows(newRows);
-            setScanResults(newScans);
-            setHasUnsavedChanges(true);
-            return;
-        }
-
-        const { l2Weights = {}, positiveWeights = {}, autoFillRemaining } = payload;
-        const newRows = rows.map(r => ({ ...r }));
-
-        const shuffle = <T,>(a: T[]) => a.map(v => [Math.random(), v] as const).sort((x, y) => x[0] - y[0]).map(([, v]) => v);
+        const mode = payload.mode; // 'add' | 'decrease'
         const pick = <T,>(a: T[]) => a[Math.floor(Math.random() * a.length)];
 
-        // Build letter → column name map once
+        const isEmpty = (v: any) =>
+            v === undefined || v === null ||
+            String(v).trim() === '' ||
+            /^submit form\.+$/i.test(String(v));
+
         const idxToName: Record<string, string> = {};
         columns.forEach((n, i) => { idxToName[colIndexToLetter(i)] = n; });
 
-        // Identify all L2 columns (DF..EM / Complaint group (L2))
-        const dfIdx = colLetterToIndex('DF');
-        const emIdx = colLetterToIndex('EM');
-        const l2Cols = columns.filter((c, i) => {
-            return (i >= dfIdx && i <= emIdx) || /complaint group \(l2\)/i.test(c);
-        });
+        const DF = colLetterToIndex('DF');
+        const EM = colLetterToIndex('EM');
+        const l2SlotCols: string[] = [];
+        for (let i = DF; i <= EM; i++) {
+            const nm = idxToName[colIndexToLetter(i)];
+            if (nm) l2SlotCols.push(nm);
+        }
 
-        const isL2SlotEmpty = (val: any): boolean => {
-            if (val === undefined || val === null) return true;
-            const str = String(val).trim();
-            return str === '' || /^submit form\.+$/i.test(str);
+        const newRows = rows.map((r, i) => ({
+            ...r,
+            __idx: i,
+            __autoVerbatim: new Set<string>(
+                r.__autoVerbatim instanceof Set
+                    ? Array.from(r.__autoVerbatim)
+                    : (Array.isArray(r.__autoVerbatim) ? r.__autoVerbatim : [])
+            )
+        }));
+
+        const addedL2sByRow = new Map<number, string[]>();   // ordered, no dupes
+
+        const markL2Added = (r: number, l2Name: string) => {
+            if (!addedL2sByRow.has(r)) addedL2sByRow.set(r, []);
+            const arr = addedL2sByRow.get(r)!;
+            if (!arr.includes(l2Name)) arr.push(l2Name);
         };
 
-        // Helper: fill an L2's follow-up columns in a row so it bypasses QC FAIL check
-        const fillFollowUps = (rowObj: Record<string, any>, l2Name: string) => {
-            const range = L2_RANGE[l2Name];
-            if (!range) return;
+        // ── SERVICE BRANCH ────────────────────────────────────────────
+        if (payload.category === 'service') {
+            const addedPositiveByRow = new Set<number>();
+            const addedNegativeByRow = new Set<number>();
 
-            const s = colLetterToIndex(range.start);
-            const e = colLetterToIndex(range.end);
-            for (let k = s; k <= e; k++) {
-                const nm = idxToName[colIndexToLetter(k)];
-                if (nm && isL2SlotEmpty(rowObj[nm])) {
-                    const opts = QC_FOLLOWUP_OPTIONS[nm];
-                    rowObj[nm] = opts && opts.length > 0 ? pick(opts) : 'Yes';
+            if (mode === 'add') {
+                // Service Positive Drivers (OK..OW)
+                for (const [driverName, enteredRaw] of Object.entries(payload.servicePositiveWeights || {})) {
+                    const requested = Math.floor(Number(enteredRaw) || 0);
+                    if (requested <= 0) continue;
+
+                    const colName = WORKSHOP_POSITIVE_L2_TO_COL[driverName];
+                    if (!colName || !columns.includes(colName)) continue;
+
+                    const pool = WORKSHOP_POSITIVE_L2_TO_L3[driverName] || [];
+
+                    fillColumnsVertically(
+                        newRows,
+                        [colName],
+                        requested,
+                        (row, col, usedInCol) => {
+                            const available = pool.filter(v => !usedInCol.has(v) && !usedInCol.has(v.trim().toLowerCase()));
+                            return available.length > 0
+                                ? available[Math.floor(Math.random() * available.length)]
+                                : (pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null);
+                        },
+                        (row) => {
+                            if (getWorkshopTier(row) !== 'positive') return false;
+                            let driverColsFilled = 0;
+                            for (const c of Object.values(WORKSHOP_POSITIVE_L2_TO_COL)) {
+                                if (!isEmptyCell(row[c])) driverColsFilled++;
+                            }
+                            for (const c of Object.values(WORKSHOP_NEGATIVE_L2_TO_COL)) {
+                                if (!isEmptyCell(row[c])) driverColsFilled++;
+                            }
+                            return driverColsFilled < 3;
+                        },
+                        (row, rIdx) => {
+                            addedPositiveByRow.add(rIdx);
+                        }
+                    );
+                }
+
+                // Service Negative Drivers (OX..PL)
+                for (const [driverName, enteredRaw] of Object.entries(payload.serviceNegativeWeights || {})) {
+                    const requested = Math.floor(Number(enteredRaw) || 0);
+                    if (requested <= 0) continue;
+
+                    const colName = WORKSHOP_NEGATIVE_L2_TO_COL[driverName];
+                    if (!colName || !columns.includes(colName)) continue;
+
+                    const pool = WORKSHOP_NEGATIVE_L2_TO_L3[driverName] || [];
+
+                    fillColumnsVertically(
+                        newRows,
+                        [colName],
+                        requested,
+                        (row, col, usedInCol) => {
+                            const available = pool.filter(v => !usedInCol.has(v) && !usedInCol.has(v.trim().toLowerCase()));
+                            return available.length > 0
+                                ? available[Math.floor(Math.random() * available.length)]
+                                : (pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null);
+                        },
+                        (row) => {
+                            if (getWorkshopTier(row) === null) return false;
+                            let driverColsFilled = 0;
+                            for (const c of Object.values(WORKSHOP_POSITIVE_L2_TO_COL)) {
+                                if (!isEmptyCell(row[c])) driverColsFilled++;
+                            }
+                            for (const c of Object.values(WORKSHOP_NEGATIVE_L2_TO_COL)) {
+                                if (!isEmptyCell(row[c])) driverColsFilled++;
+                            }
+                            return driverColsFilled < 3;
+                        },
+                        (row, rIdx) => {
+                            addedNegativeByRow.add(rIdx);
+                        }
+                    );
+                }
+
+                // Auto-fill remaining (only in Add mode)
+                if (payload.autoFillRemaining) {
+                    const posKeys = Object.keys(WORKSHOP_POSITIVE_L2_TO_COL);
+                    const negKeys = Object.keys(WORKSHOP_NEGATIVE_L2_TO_COL);
+                    const hasConfiguredPos = Object.entries(payload.servicePositiveWeights || {})
+                        .some(([, v]) => (Number(v) || 0) > 0);
+                    const hasConfiguredNeg = Object.entries(payload.serviceNegativeWeights || {})
+                        .some(([, v]) => (Number(v) || 0) > 0);
+                    const fillPos = hasConfiguredPos || !hasConfiguredNeg;
+                    const fillNeg = hasConfiguredNeg || !hasConfiguredPos;
+
+                    newRows.forEach((r, rowIdx) => {
+                        let driverColsFilled = 0;
+                        for (const c of Object.values(WORKSHOP_POSITIVE_L2_TO_COL)) {
+                            if (!isEmptyCell(r[c])) driverColsFilled++;
+                        }
+                        for (const c of Object.values(WORKSHOP_NEGATIVE_L2_TO_COL)) {
+                            if (!isEmptyCell(r[c])) driverColsFilled++;
+                        }
+                        if (driverColsFilled >= 3) return;
+
+                        if (fillPos && getWorkshopTier(r) === 'positive') {
+                            const randomL2 = pick(posKeys);
+                            const col = WORKSHOP_POSITIVE_L2_TO_COL[randomL2];
+                            const targetCol = columns.find(c => c === col) || col;
+                            const l3List = WORKSHOP_POSITIVE_L2_TO_L3[randomL2] || [];
+                            if (targetCol && l3List.length > 0 && isEmptyCell(r[targetCol])) {
+                                r[targetCol] = pick(l3List);
+                                ensureAutoVerbatimSet(r).add(targetCol);
+                                addedPositiveByRow.add(rowIdx);
+                            }
+                        }
+                        if (fillNeg && getWorkshopTier(r) !== null) {
+                            const randomL2 = pick(negKeys);
+                            const col = WORKSHOP_NEGATIVE_L2_TO_COL[randomL2];
+                            const targetCol = columns.find(c => c === col) || col;
+                            const l3List = WORKSHOP_NEGATIVE_L2_TO_L3[randomL2] || [];
+                            if (targetCol && l3List.length > 0 && isEmptyCell(r[targetCol])) {
+                                r[targetCol] = pick(l3List);
+                                ensureAutoVerbatimSet(r).add(targetCol);
+                                addedNegativeByRow.add(rowIdx);
+                            }
+                        }
+                    });
+                }
+
+                // Run the column-first verbatim fill for ALL rows at once
+                applyServiceVerbatimsColumnFirst(newRows, addedPositiveByRow, addedNegativeByRow);
+            } else {
+                // decrease
+                const decreaseDriverColumn = (targetCol: string, entered: number) => {
+                    if (!targetCol || entered <= 0) return;
+                    let existing = 0;
+                    for (let i = 0; i < totalRows; i++) {
+                        if (!isEmpty(newRows[i][targetCol])) existing++;
+                    }
+                    let toRemove = Math.min(entered, existing);
+                    if (toRemove <= 0) return;
+                    for (let i = 0; i < totalRows && toRemove > 0; i++) {
+                        const row = newRows[i];
+                        const set = ensureAutoVerbatimSet(row);
+                        if (!isEmpty(row[targetCol]) && set.has(targetCol)) {
+                            row[targetCol] = '';
+                            set.delete(targetCol);
+                            toRemove--;
+                        }
+                    }
+                };
+
+                for (const [l2Name, enteredRaw] of Object.entries(payload.servicePositiveWeights || {})) {
+                    const entered = Math.floor(Number(enteredRaw) || 0);
+                    const colName = WORKSHOP_POSITIVE_L2_TO_COL[l2Name];
+                    if (!colName) continue;
+                    const targetCol = columns.find(c => c === colName) || colName;
+                    decreaseDriverColumn(targetCol, entered);
+                }
+
+                for (const [l2Name, enteredRaw] of Object.entries(payload.serviceNegativeWeights || {})) {
+                    const entered = Math.floor(Number(enteredRaw) || 0);
+                    const colName = WORKSHOP_NEGATIVE_L2_TO_COL[l2Name];
+                    if (!colName) continue;
+                    const targetCol = columns.find(c => c === colName) || colName;
+                    decreaseDriverColumn(targetCol, entered);
                 }
             }
-        };
 
-        // 1. Gather all available (empty) L2 slots across ALL rows
-        type Slot = { rowIdx: number; colName: string };
-        let emptySlots: Slot[] = [];
-        for (let r = 0; r < totalRows; r++) {
-            for (const col of l2Cols) {
-                if (isL2SlotEmpty(newRows[r][col])) {
-                    emptySlots.push({ rowIdx: r, colName: col });
+            // SAFETY: enforce what was added on cells WE auto-filled
+            for (let r = 0; r < newRows.length; r++) {
+                const row = newRows[r];
+                const autoSet = ensureAutoVerbatimSet(row);
+                const tier = getWorkshopTier(row);
+
+                const hasPos = addedPositiveByRow.has(r);
+                const hasNeg = addedNegativeByRow.has(r);
+
+                // Positive only -> fill ONLY 3a. No 3b, no 4a.
+                if (hasPos && !hasNeg) {
+                    for (const col of [...WORK_SOFT_NEG_COLS, ...WORK_HARD_NEG_COLS]) {
+                        if (autoSet.has(col)) {
+                            row[col] = '';
+                            autoSet.delete(col);
+                        }
+                    }
+                }
+
+                // Negative only -> 3a is always empty.
+                if (hasNeg && !hasPos) {
+                    for (const col of WORK_POS_COLS) {
+                        if (autoSet.has(col)) {
+                            row[col] = '';
+                            autoSet.delete(col);
+                        }
+                    }
+                }
+
+                // Tier enforcement: Yes/Maybe rows: 4a is always empty. No rows: 3a and 3b are always empty.
+                if (tier === 'positive') {
+                    for (const col of WORK_HARD_NEG_COLS) {
+                        if (autoSet.has(col)) {
+                            row[col] = '';
+                            autoSet.delete(col);
+                        }
+                    }
+                } else if (tier === 'negative') {
+                    for (const col of [...WORK_POS_COLS, ...WORK_SOFT_NEG_COLS]) {
+                        if (autoSet.has(col)) {
+                            row[col] = '';
+                            autoSet.delete(col);
+                        }
+                    }
+                }
+
+                // If row got neither, clear all auto-filled
+                if (!hasPos && !hasNeg) {
+                    for (const col of [...WORK_POS_COLS, ...WORK_SOFT_NEG_COLS, ...WORK_HARD_NEG_COLS]) {
+                        if (autoSet.has(col)) {
+                            row[col] = '';
+                            autoSet.delete(col);
+                        }
+                    }
+                }
+            }
+        } else {
+            // ── PRODUCT BRANCH (L2 + Positive Drivers) ────────────────────
+            const getRowL2State = (r: Record<string, any>) => {
+                const set = new Set<string>();
+                let count = 0;
+                for (const c of l2SlotCols) {
+                    const v = r[c];
+                    if (!isEmpty(v)) {
+                        count++;
+                        set.add(String(v).trim().toLowerCase());
+                    }
+                }
+                return { filledL2Values: set, filledSlotCount: count };
+            };
+
+            const addedProdPosByRow = new Set<number>();
+
+            if (mode === 'add') {
+                // ── PRODUCT L2 FILL (Sequential First Slot, Random Remaining) ────
+                for (const [l2Name, enteredRaw] of Object.entries(payload.l2Weights || {})) {
+                    const requested = Math.floor(Number(enteredRaw) || 0);
+                    if (requested <= 0 || !L2_GROUPS.includes(l2Name)) continue;
+
+                    const allL2Cols = l2SlotCols;
+                    const firstSlot = allL2Cols[0]; // DF
+                    let fillsDone = 0;
+
+                    // Pass 1: Fill the FIRST slot (DF) sequentially row-by-row
+                    for (let r = 0; r < newRows.length; r++) {
+                        if (fillsDone >= requested) break;
+                        const row = newRows[r];
+
+                        let alreadyHasThisL2 = false;
+                        let currentL2Count = 0;
+                        for (const c of allL2Cols) {
+                            if (!isEmptyCell(row[c])) {
+                                currentL2Count++;
+                                if (String(row[c]).toLowerCase() === l2Name.toLowerCase()) alreadyHasThisL2 = true;
+                            }
+                        }
+
+                        if (!alreadyHasThisL2 && currentL2Count < 4 && isEmptyCell(row[firstSlot])) {
+                            row[firstSlot] = l2Name;
+                            ensureAutoVerbatimSet(row).add(firstSlot);
+                            fillOneRandomFollowUpForL2(row, l2Name, idxToName);
+                            markL2Added(r, l2Name);
+                            fillsDone++;
+                        }
+                    }
+
+                    // Pass 2: Remaining fills — pick a random empty slot from DG..EM
+                    if (fillsDone < requested) {
+                        const remainingSlots = allL2Cols.slice(1); // DG..EM
+
+                        for (let r = 0; r < newRows.length; r++) {
+                            if (fillsDone >= requested) break;
+                            const row = newRows[r];
+
+                            let alreadyHasThisL2 = false;
+                            let currentL2Count = 0;
+                            for (const c of allL2Cols) {
+                                if (!isEmptyCell(row[c])) {
+                                    currentL2Count++;
+                                    if (String(row[c]).toLowerCase() === l2Name.toLowerCase()) alreadyHasThisL2 = true;
+                                }
+                            }
+
+                            if (alreadyHasThisL2 || currentL2Count >= 4) continue;
+
+                            const emptySlots = remainingSlots.filter(c => isEmptyCell(row[c]));
+                            if (emptySlots.length === 0) continue;
+
+                            const targetCol = emptySlots[Math.floor(Math.random() * emptySlots.length)];
+                            row[targetCol] = l2Name;
+                            ensureAutoVerbatimSet(row).add(targetCol);
+                            fillOneRandomFollowUpForL2(row, l2Name, idxToName);
+                            markL2Added(r, l2Name);
+                            fillsDone++;
+                        }
+                    }
+                }
+
+                // ── Auto-fill remaining (Add mode only) ──────────────────────
+                if (payload.autoFillRemaining) {
+                    for (let r = 0; r < totalRows; r++) {
+                        const state = getRowL2State(newRows[r]);
+                        if (state.filledSlotCount > 0) continue; // row already has ≥1 L2
+
+                        const emptySlots = l2SlotCols.slice(0, 4).filter(c => isEmpty(newRows[r][c]));
+                        if (emptySlots.length === 0) continue;
+
+                        const randomL2 = pick(L2_GROUPS);
+                        const targetCol = emptySlots[0];
+                        newRows[r][targetCol] = randomL2;
+                        fillOneRandomFollowUpForL2(newRows[r], randomL2, idxToName);
+                        markL2Added(r, randomL2);
+                    }
+                }
+
+                // ── POSITIVE DRIVER FILL (AU..BM) ─────────────────────────────
+                for (const [colName, enteredRaw] of Object.entries(payload.positiveWeights || {})) {
+                    const requested = Math.floor(Number(enteredRaw) || 0);
+                    if (requested <= 0) continue;
+
+                    const targetCol = POSITIVE_DRIVER_COLUMNS[colName] || (columns.includes(colName) ? colName : null);
+                    if (!targetCol || !columns.includes(targetCol)) continue;
+
+                    const pool = POSITIVE_DRIVER_L2_TO_L3[colName] || [];
+
+                    fillColumnsVertically(
+                        newRows,
+                        [targetCol],
+                        requested,
+                        (row, col, usedInCol) => {
+                            const available = pool.filter(v => !usedInCol.has(v) && !usedInCol.has(v.trim().toLowerCase()));
+                            return available.length > 0
+                                ? available[Math.floor(Math.random() * available.length)]
+                                : (pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null);
+                        },
+                        (row) => {
+                            const pRating = readProductRating(row);
+                            return pRating !== 'detractor';
+                        },
+                        (row, rIdx) => {
+                            addedProdPosByRow.add(rIdx);
+                        }
+                    );
+                }
+
+                // ── Column-First Product Verbatim Fill ─────────────────────────
+                applyProductVerbatimsColumnFirst(newRows, addedProdPosByRow, addedL2sByRow, l2SlotCols);
+            } else {
+                // DECREASE: remove min(entered, existing) cells, rightmost-first
+                for (const [l2Name, enteredRaw] of Object.entries(payload.l2Weights || {})) {
+                    const entered = Math.floor(Number(enteredRaw) || 0);
+                    if (!L2_GROUPS.includes(l2Name)) continue;
+                    const normalized = l2Name.trim().toLowerCase();
+
+                    let existing = 0;
+                    for (let r = 0; r < totalRows; r++) {
+                        for (const c of l2SlotCols) {
+                            const v = newRows[r][c];
+                            if (!isEmpty(v) && String(v).trim().toLowerCase() === normalized) {
+                                existing++;
+                            }
+                        }
+                    }
+
+                    let toRemove = Math.min(entered, existing);
+                    if (toRemove <= 0) continue;
+
+                    for (let r = 0; r < totalRows && toRemove > 0; r++) {
+                        // Scan rightmost → leftmost across full DF..EM range
+                        for (let si = l2SlotCols.length - 1; si >= 0 && toRemove > 0; si--) {
+                            const c = l2SlotCols[si];
+                            const v = newRows[r][c];
+                            if (!isEmpty(v) && String(v).trim().toLowerCase() === normalized) {
+                                newRows[r][c] = '';
+
+                                // Clear only auto-filled follow-ups for this L2
+                                const followUpCols = getL2FollowUpColumns(l2Name, idxToName);
+                                for (const col of followUpCols) {
+                                    const set = ensureAutoVerbatimSet(newRows[r]);
+                                    if (set.has(col)) {
+                                        newRows[r][col] = '';
+                                        set.delete(col);
+                                    }
+                                }
+
+                                // Optional safety: if row has no L2 left, clear all auto-filled follow-ups
+                                const stillHasL2 = l2SlotCols.some(slotCol => !isEmptyCell(newRows[r][slotCol]));
+                                if (!stillHasL2) {
+                                    for (const l2Name2 of Object.keys(ISSUE_COLUMN_RANGE_MAPPING)) {
+                                        const cols2 = getL2FollowUpColumns(l2Name2, idxToName);
+                                        for (const col of cols2) {
+                                            const set = ensureAutoVerbatimSet(newRows[r]);
+                                            if (set.has(col)) {
+                                                newRows[r][col] = '';
+                                                set.delete(col);
+                                            }
+                                        }
+                                    }
+                                }
+
+                                toRemove--;
+                                break; // only 1 removal per row-pass
+                            }
+                        }
+                    }
+                }
+
+                // Decrease mode: remove up to entered auto-filled AU..BM cells
+                for (const [driverName, enteredRaw] of Object.entries(payload.positiveWeights || {})) {
+                    const entered = Math.floor(Number(enteredRaw) || 0);
+                    if (entered <= 0) continue;
+                    const targetCol = POSITIVE_DRIVER_COLUMNS[driverName];
+                    if (!targetCol || !columns.includes(targetCol)) continue;
+
+                    let existing = 0;
+                    for (let i = 0; i < newRows.length; i++) {
+                        if (!isEmptyCell(newRows[i][targetCol])) existing++;
+                    }
+                    let toRemove = Math.min(entered, existing);
+                    if (toRemove <= 0) continue;
+
+                    for (let i = 0; i < newRows.length && toRemove > 0; i++) {
+                        const row = newRows[i];
+                        const set = ensureAutoVerbatimSet(row);
+                        if (!isEmptyCell(row[targetCol]) && set.has(targetCol)) {
+                            row[targetCol] = '';
+                            set.delete(targetCol);
+                            toRemove--;
+                        }
+                    }
+                }
+            }
+        } // end product branch
+
+        // ── RATING-BASED VERBATIM CLEANUP (Decrease mode only) ──────────
+        if (mode === 'decrease') {
+            for (let r = 0; r < newRows.length; r++) {
+                const row = newRows[r];
+
+                let hasL2 = false;
+                for (const c of l2SlotCols) {
+                    if (!isEmpty(row[c])) { hasL2 = true; break; }
+                }
+
+                let hasDriver = false;
+                for (const d of POSITIVE_DRIVERS) {
+                    if (!isEmpty(row[d])) { hasDriver = true; break; }
+                }
+
+                let hasSvcPos = false;
+                for (const sp of SERVICE_POSITIVE_GROUPS) {
+                    const c = WORKSHOP_POSITIVE_L2_TO_COL[sp];
+                    const targetCol = columns.find(col => col === c) || c;
+                    if (targetCol && !isEmpty(row[targetCol])) { hasSvcPos = true; break; }
+                }
+
+                let hasSvcNeg = false;
+                for (const sn of SERVICE_NEGATIVE_GROUPS) {
+                    const c = WORKSHOP_NEGATIVE_L2_TO_COL[sn];
+                    const targetCol = columns.find(col => col === c) || c;
+                    if (targetCol && !isEmpty(row[targetCol])) { hasSvcNeg = true; break; }
+                }
+
+                // Clear only auto-filled cells, and only when their trigger is gone
+                if (!hasL2) {
+                    PROD_NEG_COLS.forEach(col => clearIfAutoFilled(row, col));
+                    PROD_WHY_NOT_COLS.forEach(col => clearIfAutoFilled(row, col));
+                }
+                if (!hasDriver) {
+                    [...PROD_POS_COLS, PROD_POS_COL_5].forEach(col => clearIfAutoFilled(row, col));
+                }
+                if (!hasSvcPos) {
+                    WORK_POS_COLS.forEach(col => clearIfAutoFilled(row, col));
+                    WORK_SOFT_NEG_COLS.forEach(col => clearIfAutoFilled(row, col));
+                }
+                if (!hasSvcNeg) {
+                    WORK_HARD_NEG_COLS.forEach(col => clearIfAutoFilled(row, col));
                 }
             }
         }
 
-        // 2. Fill L2 weights across available empty L2 slots
-        for (const [l2Name, pct] of Object.entries(l2Weights)) {
-            const numPct = Number(pct) || 0;
-            if (numPct <= 0 || emptySlots.length === 0) continue;
-            const count = Math.min(Math.round((numPct / 100) * totalRows), emptySlots.length);
-            if (count <= 0) continue;
-
-            // Prefer empty slots in rows that don't already have this exact L2
-            const eligible = emptySlots.filter(s => {
-                return !l2Cols.some(c => String(newRows[s.rowIdx][c] || '').trim().toLowerCase() === l2Name.trim().toLowerCase());
-            });
-            const pool = eligible.length >= count ? eligible : emptySlots;
-            const chosen = shuffle(pool).slice(0, count);
-
-            chosen.forEach(slot => {
-                newRows[slot.rowIdx][slot.colName] = l2Name;
-                fillFollowUps(newRows[slot.rowIdx], l2Name);
-            });
-
-            const chosenSet = new Set(chosen.map(s => `${s.rowIdx}:${s.colName}`));
-            emptySlots = emptySlots.filter(s => !chosenSet.has(`${s.rowIdx}:${s.colName}`));
-        }
-
-        // 3. Positive Driver weights (AU..BM)
-        for (const [colName, pct] of Object.entries(positiveWeights)) {
-            if (!columns.includes(colName)) continue;
-            const numPct = Number(pct) || 0;
-            if (numPct <= 0) continue;
-            const count = Math.round((numPct / 100) * totalRows);
-            const values = POSITIVE_DRIVER_VALUES[colName] || ['Yes', 'Good', 'Excellent'];
-            const available = shuffle(
-                Array.from({ length: totalRows }, (_, i) => i)
-            ).slice(0, count);
-            available.forEach(i => {
-                newRows[i][colName] = pick(values);
-            });
-        }
-
-        // 4. Auto-fill remaining empty L2 slots with random L2s
-        if (autoFillRemaining && emptySlots.length > 0) {
-            const l2Names = Object.keys(L2_RANGE);
-            const totalFilledL2 = Object.values(l2Weights).reduce((a, b) => a + (Number(b) || 0), 0);
-            const remainingPct = Math.max(0, 100 - totalFilledL2);
-            let remainingCount = Math.min(Math.round((remainingPct / 100) * totalRows), emptySlots.length);
-
-            // If remainingCount is 0 but there are rows with no L2 at all, ensure they receive an L2
-            const rowsWithoutL2 = Array.from({ length: totalRows }, (_, i) => i).filter(rIdx => {
-                return !l2Cols.some(c => !isL2SlotEmpty(newRows[rIdx][c]));
-            });
-            if (remainingCount === 0 && rowsWithoutL2.length > 0) {
-                remainingCount = Math.min(rowsWithoutL2.length, emptySlots.length);
-            }
-
-            while (remainingCount > 0 && emptySlots.length > 0) {
-                const randomL2 = pick(l2Names);
-                // Prefer empty slots in rows that don't have any L2 yet
-                const zeroL2Slots = emptySlots.filter(s => {
-                    return !l2Cols.some(c => !isL2SlotEmpty(newRows[s.rowIdx][c]));
-                });
-                const pool = zeroL2Slots.length > 0 ? zeroL2Slots : emptySlots;
-                const chosenSlot = pick(shuffle(pool));
-
-                newRows[chosenSlot.rowIdx][chosenSlot.colName] = randomL2;
-                fillFollowUps(newRows[chosenSlot.rowIdx], randomL2);
-
-                emptySlots = emptySlots.filter(s => !(s.rowIdx === chosenSlot.rowIdx && s.colName === chosenSlot.colName));
-                remainingCount--;
-            }
-        }
-
-        // 5. Rescan using the top-level scanRowQc (guaranteed in scope)
         const newScans = newRows.map(r => scanRowQc(r, columns));
-
         setRows(newRows);
         setScanResults(newScans);
         setHasUnsavedChanges(true);
@@ -1465,6 +3258,20 @@ const QcDataCheck: React.FC<QcDataCheckProps> = ({ onNavigateToDataSources }) =>
                 .qc-fail-badge:hover {
                     transform: scale(1.05);
                     box-shadow: 0 2px 8px rgba(245, 158, 11, 0.4);
+                }
+                .qc-indicator-dot {
+                    width: 8px;
+                    height: 8px;
+                    border-radius: 50%;
+                    display: inline-block;
+                    flex-shrink: 0;
+                    transition: transform 0.12s ease;
+                }
+                .qc-indicator-dot.clickable {
+                    cursor: pointer;
+                }
+                .qc-indicator-dot.clickable:hover {
+                    transform: scale(1.3);
                 }
                 .qc-compact-select:focus {
                     border-color: #2563eb !important;
@@ -1709,6 +3516,32 @@ const QcDataCheck: React.FC<QcDataCheckProps> = ({ onNavigateToDataSources }) =>
                                 <option value="all">All Versions</option>
                                 {ibVersions.map(v => (
                                     <option key={v.id} value={v.name}>{v.name}</option>
+                                ))}
+                            </select>
+                        </div>
+
+                        {/* Brand & Model */}
+                        <div>
+                            <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>
+                                Brand &amp; Model
+                            </label>
+                            <select
+                                value={filterBrandModel}
+                                onChange={e => setFilterBrandModel(e.target.value)}
+                                style={{
+                                    width: '100%',
+                                    padding: '7px 10px',
+                                    borderRadius: '6px',
+                                    border: '1px solid #cbd5e1',
+                                    background: '#ffffff',
+                                    fontSize: '12.5px',
+                                    color: '#0f172a',
+                                    outline: 'none'
+                                }}
+                            >
+                                <option value="all">All Brands &amp; Models</option>
+                                {brandModels.map(bm => (
+                                    <option key={bm} value={bm}>{bm}</option>
                                 ))}
                             </select>
                         </div>
@@ -2060,7 +3893,8 @@ const QcDataCheck: React.FC<QcDataCheckProps> = ({ onNavigateToDataSources }) =>
                                             fontSize: '11.5px',
                                             width: '160px',
                                             outline: 'none',
-                                            background: '#ffffff'
+                                            background: '#ffffff',
+                                            color: 'black'
                                         }}
                                     />
                                 </div>
@@ -2116,8 +3950,8 @@ const QcDataCheck: React.FC<QcDataCheckProps> = ({ onNavigateToDataSources }) =>
                                 </button>
                                 <button
                                     className="modern-btn modern-btn-secondary"
-                                    onClick={() => setShowWeightModal(true)}
-                                    title="Auto-fill via weightage %"
+                                    onClick={handleOpenWeightModal}
+                                    title="Auto-fill via count weights (Add / Decrease)"
                                 >
                                     <Sparkles size={14} /> Auto-Fill Weights
                                 </button>
@@ -2339,6 +4173,7 @@ const QcDataCheck: React.FC<QcDataCheckProps> = ({ onNavigateToDataSources }) =>
                                                 onJumpBackToBadge={jumpBackToBadge}
                                                 onJumpToFirstFollowUp={jumpToFirstFollowUp}
                                                 onJumpBackToL2={jumpBackToL2}
+                                                onJumpToGroup={jumpToGroup}
                                             />
                                         );
                                     })}
@@ -2457,10 +4292,13 @@ const QcDataCheck: React.FC<QcDataCheckProps> = ({ onNavigateToDataSources }) =>
                 <WeightageModal
                     onClose={() => setShowWeightModal(false)}
                     onApply={applyWeights}
+                    totalRows={rows.length}
+                    existingCounts={existingCounts}
                 />
             )}
         </div>
     );
 };
+
 
 export default QcDataCheck;

@@ -41,12 +41,12 @@ export const WORKSHOP_POSITIVE_L2_TO_L3: Record<string, string[]> = {
     "Quick Service Done"
   ],
   "Customer Lounge Amenities": [
-    "Tea , Coffee Vending Machine",
-    "AC",
-    "TV",
-    "WIFI",
-    "Magazines , Newspaper",
-    "Comfortable Seating"
+    "Free Tea and Coffee Vending Machine",
+    "Air-Conditioned Customer Lounge",
+    "Television with Entertainment Channels",
+    "High-Speed Free Wi-Fi Access",
+    "Access to Magazines and Newspapers",
+    "Comfortable and Spacious Seating"
   ],
   "Operating Hours": [
     "Sunday Opening",
@@ -56,8 +56,8 @@ export const WORKSHOP_POSITIVE_L2_TO_L3: Record<string, string[]> = {
   "Workshop Facilities": [
     "Pick up & Drop",
     "Express Service",
-    "AMC",
-    "RSA",
+    "Annual Maintenance Contract",
+    "Roadside Assistance",
     "Live Streaming",
     "Paper Less Workshop",
     "Work in Progress Updates",
@@ -68,17 +68,17 @@ export const WORKSHOP_POSITIVE_L2_TO_L3: Record<string, string[]> = {
 };
 
 export const WORKSHOP_POSITIVE_L2_TO_COL: Record<string, string> = {
-  "Resolution of Problem":     "Resolution of Problem is good",
-  "Parts availability":        "Parts availability & quality",
-  "Skilled Manpower":          "Skilled Manpower is available in workshop",
-  "Washing Quality":           "Washing Quality (Applicable only for Asia)",
-  "Service Adviser Behavior":  "Happy with Service Adviser Behaviour",
-  "Cost & Explanation":        "Cost & Explanation was good",
-  "Warranty Policy":           "Warranty Policy is good",
-  "Waiting Time":              "Waiting Time was adequate",
+  "Resolution of Problem": "Resolution of Problem is good",
+  "Parts availability": "Parts availability & quality",
+  "Skilled Manpower": "Skilled Manpower is available in workshop",
+  "Washing Quality": "Washing Quality (Applicable only for Asia)",
+  "Service Adviser Behavior": "Happy with Service Adviser Behaviour",
+  "Cost & Explanation": "Cost & Explanation was good",
+  "Warranty Policy": "Warranty Policy is good",
+  "Waiting Time": "Waiting Time was adequate",
   "Customer Lounge Amenities": "Satisfied with Customer Lounge Amenities",
-  "Operating Hours":           "Extension of Operating Hours is very supportive",
-  "Workshop Facilities":       "Workshop Facilities"
+  "Operating Hours": "Extension of Operating Hours is very supportive",
+  "Workshop Facilities": "Workshop Facilities"
 };
 
 export const WORKSHOP_NEGATIVE_L2_TO_L3: Record<string, string[]> = {
@@ -129,12 +129,12 @@ export const WORKSHOP_NEGATIVE_L2_TO_L3: Record<string, string[]> = {
     "High Time took for Service"
   ],
   "Customer Lounge Amenities": [
-    "Tea , Coffee Vending Machine",
-    "AC",
-    "TV",
-    "WIFI",
-    "Magazines , Newspaper",
-    "Comfortable Seating"
+    "Free Tea and Coffee Vending Machine",
+    "Air-Conditioned Customer Lounge",
+    "Television with Entertainment Channels",
+    "High-Speed Free Wi-Fi Access",
+    "Access to Magazines and Newspapers",
+    "Comfortable and Spacious Seating"
   ],
   "Operating Hours": [
     "Sunday Opening",
@@ -144,8 +144,8 @@ export const WORKSHOP_NEGATIVE_L2_TO_L3: Record<string, string[]> = {
   "Workshop Facilities": [
     "Pick up & Drop",
     "Express Service",
-    "AMC",
-    "RSA",
+    "Annual Maintenance Contract",
+    "Roadside Assistance",
     "Live Streaming",
     "Paper Less Workshop",
     "Work in Progress Updates",
@@ -156,17 +156,17 @@ export const WORKSHOP_NEGATIVE_L2_TO_L3: Record<string, string[]> = {
 };
 
 export const WORKSHOP_NEGATIVE_L2_TO_COL: Record<string, string> = {
-  "Resolution of Problem":     "Complaints not resolved",
-  "Parts availability":        "Parts availability issues Give names of three parts which were not available, with details.",
-  "Skilled Manpower":          "Improve Skilled Manpower",
-  "Washing Quality":           "Washing Quality (Applicable only for Asia)46",
-  "Service Adviser Behavior":  "Service Adviser Behaviour issues",
-  "Cost & Explanation":        "Not satisfied with Cost & Explanation",
-  "Warranty Policy":           "Warranty Policy issues",
-  "Waiting Time":              "Waiting Time is more",
+  "Resolution of Problem": "Complaints not resolved",
+  "Parts availability": "Parts availability issues Give names of three parts which were not available, with details.",
+  "Skilled Manpower": "Improve Skilled Manpower",
+  "Washing Quality": "Washing Quality (Applicable only for Asia)46",
+  "Service Adviser Behavior": "Service Adviser Behaviour issues",
+  "Cost & Explanation": "Not satisfied with Cost & Explanation",
+  "Warranty Policy": "Warranty Policy issues",
+  "Waiting Time": "Waiting Time is more",
   "Customer Lounge Amenities": "Improve Customer Lounge Amenities",
-  "Operating Hours":           "Extent the Operating Hours",
-  "Workshop Facilities":       "Improve Workshop Facilities"
+  "Operating Hours": "Extent the Operating Hours",
+  "Workshop Facilities": "Improve Workshop Facilities"
 };
 
 export function mulberry32(seed: number): () => number {

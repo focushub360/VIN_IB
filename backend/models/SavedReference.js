@@ -1,39 +1,33 @@
-const { DataTypes } = require('sequelize');
-const sequelize = require('../database');
+const mongoose = require('mongoose');
 
-const SavedReference = sequelize.define('SavedReference', {
-    id: {
-        type: DataTypes.INTEGER,
-        primaryKey: true,
-        autoIncrement: true
-    },
+const savedReferenceSchema = new mongoose.Schema({
     name: {
-        type: DataTypes.STRING,
-        allowNull: false
+        type: String,
+        required: true
     },
     region_name: {
-        type: DataTypes.STRING,
-        allowNull: true
+        type: String,
+        default: null
     },
     country_name: {
-        type: DataTypes.STRING,
-        allowNull: true
+        type: String,
+        default: null
     },
     ib_version_name: {
-        type: DataTypes.STRING,
-        allowNull: true
+        type: String,
+        default: null
     },
     total_records: {
-        type: DataTypes.INTEGER,
-        allowNull: false,
-        defaultValue: 0
+        type: Number,
+        required: true,
+        default: 0
     },
     parsed_json: {
-        type: DataTypes.JSON, // Stores { columns: [...], rows: [...] }
-        allowNull: true
+        type: mongoose.Schema.Types.Mixed,
+        default: null
     }
 }, {
     timestamps: true
 });
 
-module.exports = SavedReference;
+module.exports = mongoose.model('SavedReference', savedReferenceSchema);

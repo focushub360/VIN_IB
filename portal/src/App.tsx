@@ -2,6 +2,7 @@ import { Navigate, Route, BrowserRouter as Router, Routes } from 'react-router-d
 import AdminDashboard from './AdminDashboard';
 import Login from './Login';
 import TenantDashboard from './TenantDashboard';
+import './layoutSize.css';
 
 function App() {
   return (

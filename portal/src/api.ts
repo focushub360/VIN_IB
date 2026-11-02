@@ -1,6 +1,13 @@
 import axios from 'axios';
 
-export const BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.PROD ? 'http://localhost:3001' : 'http://localhost:3001');
+const isLocalhost =
+    typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1');
+
+export const BASE_URL = isLocalhost
+    ? 'http://localhost:3001'
+    : 'https://vin-ib-5dnv.onrender.com';
 export const API_URL = `${BASE_URL.replace(/\/$/, '')}/api`;
 
 const api = axios.create({
@@ -39,6 +46,7 @@ export interface CommonUploadItem {
     region_name: string;
     country_name: string;
     ib_version_name: string;
+    brand_model_name?: string;
     total_records: number;
     status: string;
     is_common: boolean;
@@ -51,6 +59,7 @@ export interface UploadDataResponse {
     region_name: string;
     country_name: string;
     ib_version_name: string;
+    brand_model_name?: string;
     total_records: number;
     columns: string[];
     rows: Record<string, any>[];
@@ -129,6 +138,22 @@ export const saveReference = async (payload: {
 
 export const getReferences = async (): Promise<any[]> => {
     const res = await api.get('/references');
+    return res.data;
+};
+
+// Custom Master Data APIs
+export const getCustomMasterData = async (): Promise<any> => {
+    const res = await api.get('/master-data/custom');
+    return res.data;
+};
+
+export const addCustomMasterData = async (type: string, value: string): Promise<any> => {
+    const res = await api.post('/master-data/custom', { type, value });
+    return res.data;
+};
+
+export const deleteCustomMasterData = async (type: string, value: string): Promise<any> => {
+    const res = await api.delete(`/master-data/custom/${type}/${encodeURIComponent(value)}`);
     return res.data;
 };
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import {
     UploadCloud,
@@ -22,7 +22,10 @@ import {
     getIbVersions,
     getCommonUploads,
     uploadCommonFile,
-    deleteCommonUpload
+    deleteCommonUpload,
+    getCustomMasterData,
+    addCustomMasterData,
+    deleteCustomMasterData
 } from './api';
 import type {
     RegionItem,
@@ -40,6 +43,11 @@ const DataSources: React.FC<DataSourcesProps> = ({ onSelectFileForTab }) => {
     const [regions, setRegions] = useState<RegionItem[]>([]);
     const [countries, setCountries] = useState<CountryItem[]>([]);
     const [ibVersions, setIbVersions] = useState<IbVersionItem[]>([]);
+    const [brandModels, setBrandModels] = useState<string[]>([]);
+    const [selectedBrandModel, setSelectedBrandModel] = useState<string>('');
+    const [customMasterData, setCustomMasterData] = useState<any>({
+        regions: [], countries: [], ibVersions: [], brandModels: []
+    });
 
     // Form inputs
     const [selectedRegionId, setSelectedRegionId] = useState<string>('');
@@ -63,7 +71,57 @@ const DataSources: React.FC<DataSourcesProps> = ({ onSelectFileForTab }) => {
     useEffect(() => {
         loadMasterData();
         loadCommonFiles();
+        loadCustomMasterData();
     }, []);
+
+    const loadCustomMasterData = async () => {
+        try {
+            const data = await getCustomMasterData();
+            setCustomMasterData(data || { regions: [], countries: [], ibVersions: [], brandModels: [] });
+            if (data && data.brandModels && data.brandModels.length > 0) {
+                setBrandModels(data.brandModels);
+                setSelectedBrandModel(prev => prev || data.brandModels[0]);
+            }
+        } catch (err) {
+            console.error('Failed to load custom master data:', err);
+        }
+    };
+
+    const handleAddOption = async (type: string, value: string) => {
+        if (!value || !value.trim()) return;
+        const trimmed = value.trim();
+        try {
+            await addCustomMasterData(type, trimmed);
+            await loadCustomMasterData();
+            if (type === 'brandModels') {
+                setSelectedBrandModel(trimmed);
+            } else if (type === 'countries') {
+                setSelectedCountryName(trimmed);
+            } else if (type === 'ibVersions') {
+                setSelectedIbVersionName(trimmed);
+            } else if (type === 'regions') {
+                setSelectedRegionId(trimmed);
+            }
+        } catch (err) {
+            alert('Failed to add option');
+        }
+    };
+
+    const handleRemoveOption = async (type: string, value: string) => {
+        if (!value) return;
+        if (!window.confirm(`Are you sure you want to remove "${value}"?`)) return;
+        try {
+            await deleteCustomMasterData(type, value);
+            await loadCustomMasterData();
+            if (type === 'brandModels') {
+                setSelectedBrandModel('');
+            } else if (type === 'countries') {
+                setSelectedCountryName('');
+            }
+        } catch (err) {
+            alert('Failed to remove option');
+        }
+    };
 
     // When region changes, update countries
     useEffect(() => {
@@ -120,6 +178,44 @@ const DataSources: React.FC<DataSourcesProps> = ({ onSelectFileForTab }) => {
             setIsLoadingFiles(false);
         }
     };
+
+    const displayRegions = useMemo(() => {
+        const list = [...regions];
+        (customMasterData.regions || []).forEach((rName: string) => {
+            if (!list.some(r => r.name.toLowerCase() === rName.toLowerCase())) {
+                list.push({ id: rName as any, name: rName });
+            }
+        });
+        return list;
+    }, [regions, customMasterData.regions]);
+
+    const displayCountries = useMemo(() => {
+        const list = [...countries];
+        (customMasterData.countries || []).forEach((cName: string, idx: number) => {
+            if (!list.some(c => c.name.toLowerCase() === cName.toLowerCase())) {
+                list.push({ id: 99000 + idx, name: cName, region_id: 0, region_name: '' });
+            }
+        });
+        return list;
+    }, [countries, customMasterData.countries]);
+
+    const displayIbVersions = useMemo(() => {
+        const list = [...ibVersions];
+        (customMasterData.ibVersions || []).forEach((vName: string, idx: number) => {
+            if (!list.some(v => v.name.toLowerCase() === vName.toLowerCase())) {
+                list.push({ id: 99000 + idx, name: vName });
+            }
+        });
+        return list;
+    }, [ibVersions, customMasterData.ibVersions]);
+
+    const displayBrandModels = useMemo(() => {
+        const set = new Set<string>();
+        brandModels.forEach(bm => set.add(bm));
+        (customMasterData.brandModels || []).forEach((bm: string) => set.add(bm));
+        if (set.size === 0) set.add('General');
+        return Array.from(set);
+    }, [brandModels, customMasterData.brandModels]);
 
     const handleFileSelected = (file: File) => {
         setFileToUpload(file);
@@ -184,8 +280,8 @@ const DataSources: React.FC<DataSourcesProps> = ({ onSelectFileForTab }) => {
                 });
 
             // Find current region name
-            const currentReg = regions.find(r => String(r.id) === String(selectedRegionId));
-            const regionName = currentReg ? currentReg.name : 'Africa';
+            const currentReg = displayRegions.find(r => String(r.id) === String(selectedRegionId));
+            const regionName = currentReg ? currentReg.name : (selectedRegionId || 'Africa');
 
             const formData = new FormData();
             formData.append('file', fileToUpload);
@@ -193,6 +289,7 @@ const DataSources: React.FC<DataSourcesProps> = ({ onSelectFileForTab }) => {
             formData.append('region_name', regionName);
             formData.append('country_name', selectedCountryName || 'General');
             formData.append('ib_version_name', selectedIbVersionName || 'IB 3.0 (449-Col Guinea)');
+            formData.append('brand_model_name', selectedBrandModel || 'General');
             formData.append('is_common', 'true');
             formData.append('total_records', String(parsedRows.length));
             formData.append('columns', JSON.stringify(uniqueCols));
@@ -239,7 +336,8 @@ const DataSources: React.FC<DataSourcesProps> = ({ onSelectFileForTab }) => {
             f.file_name.toLowerCase().includes(q) ||
             f.region_name.toLowerCase().includes(q) ||
             f.country_name.toLowerCase().includes(q) ||
-            f.ib_version_name.toLowerCase().includes(q)
+            f.ib_version_name.toLowerCase().includes(q) ||
+            (f.brand_model_name && f.brand_model_name.toLowerCase().includes(q))
         );
     });
 
@@ -312,24 +410,45 @@ const DataSources: React.FC<DataSourcesProps> = ({ onSelectFileForTab }) => {
                         <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '5px' }}>
                             Region <span style={{ color: '#ef4444' }}>*</span>
                         </label>
-                        <select
-                            value={selectedRegionId}
-                            onChange={e => setSelectedRegionId(e.target.value)}
-                            style={{
-                                width: '100%',
-                                padding: '8px 12px',
-                                borderRadius: '8px',
-                                border: '1px solid #cbd5e1',
-                                background: '#ffffff',
-                                fontSize: '13px',
-                                color: '#0f172a',
-                                outline: 'none'
-                            }}
-                        >
-                            {regions.map(r => (
-                                <option key={r.id} value={r.id}>{r.name}</option>
-                            ))}
-                        </select>
+                        <div style={{ display: 'flex', gap: '4px' }}>
+                            <select
+                                value={selectedRegionId}
+                                onChange={e => setSelectedRegionId(e.target.value)}
+                                style={{
+                                    flex: 1,
+                                    padding: '8px 12px',
+                                    borderRadius: '8px',
+                                    border: '1px solid #cbd5e1',
+                                    background: '#ffffff',
+                                    fontSize: '13px',
+                                    color: '#0f172a',
+                                    outline: 'none'
+                                }}
+                            >
+                                {displayRegions.map(r => (
+                                    <option key={r.id} value={r.id}>{r.name}</option>
+                                ))}
+                            </select>
+                            <button
+                                type="button"
+                                title="Add Region"
+                                onClick={() => {
+                                    const val = prompt('Enter new Region:');
+                                    if (val) handleAddOption('regions', val);
+                                }}
+                                style={{ padding: '8px 10px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', cursor: 'pointer', fontWeight: 700, color: '#1d4ed8' }}
+                            >+</button>
+                            <button
+                                type="button"
+                                title="Remove Selected Region"
+                                onClick={() => {
+                                    const cur = displayRegions.find(r => String(r.id) === String(selectedRegionId));
+                                    const val = cur ? cur.name : selectedRegionId;
+                                    if (val) handleRemoveOption('regions', val);
+                                }}
+                                style={{ padding: '8px 10px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', cursor: 'pointer', fontWeight: 700, color: '#dc2626' }}
+                            >-</button>
+                        </div>
                     </div>
 
                     {/* Country */}
@@ -337,28 +456,47 @@ const DataSources: React.FC<DataSourcesProps> = ({ onSelectFileForTab }) => {
                         <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '5px' }}>
                             Country <span style={{ color: '#ef4444' }}>*</span>
                         </label>
-                        <select
-                            value={selectedCountryName}
-                            onChange={e => setSelectedCountryName(e.target.value)}
-                            style={{
-                                width: '100%',
-                                padding: '8px 12px',
-                                borderRadius: '8px',
-                                border: '1px solid #cbd5e1',
-                                background: '#ffffff',
-                                fontSize: '13px',
-                                color: '#0f172a',
-                                outline: 'none'
-                            }}
-                        >
-                            {countries.length === 0 ? (
-                                <option value="General">General / All Countries</option>
-                            ) : (
-                                countries.map(c => (
-                                    <option key={c.id} value={c.name}>{c.name}</option>
-                                ))
-                            )}
-                        </select>
+                        <div style={{ display: 'flex', gap: '4px' }}>
+                            <select
+                                value={selectedCountryName}
+                                onChange={e => setSelectedCountryName(e.target.value)}
+                                style={{
+                                    flex: 1,
+                                    padding: '8px 12px',
+                                    borderRadius: '8px',
+                                    border: '1px solid #cbd5e1',
+                                    background: '#ffffff',
+                                    fontSize: '13px',
+                                    color: '#0f172a',
+                                    outline: 'none'
+                                }}
+                            >
+                                {displayCountries.length === 0 ? (
+                                    <option value="General">General / All Countries</option>
+                                ) : (
+                                    displayCountries.map(c => (
+                                        <option key={c.id} value={c.name}>{c.name}</option>
+                                    ))
+                                )}
+                            </select>
+                            <button
+                                type="button"
+                                title="Add Country"
+                                onClick={() => {
+                                    const val = prompt('Enter new Country:');
+                                    if (val) handleAddOption('countries', val);
+                                }}
+                                style={{ padding: '8px 10px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', cursor: 'pointer', fontWeight: 700, color: '#1d4ed8' }}
+                            >+</button>
+                            <button
+                                type="button"
+                                title="Remove Selected Country"
+                                onClick={() => {
+                                    if (selectedCountryName) handleRemoveOption('countries', selectedCountryName);
+                                }}
+                                style={{ padding: '8px 10px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', cursor: 'pointer', fontWeight: 700, color: '#dc2626' }}
+                            >-</button>
+                        </div>
                     </div>
 
                     {/* IB Version */}
@@ -366,24 +504,88 @@ const DataSources: React.FC<DataSourcesProps> = ({ onSelectFileForTab }) => {
                         <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '5px' }}>
                             IB Version <span style={{ color: '#ef4444' }}>*</span>
                         </label>
-                        <select
-                            value={selectedIbVersionName}
-                            onChange={e => setSelectedIbVersionName(e.target.value)}
-                            style={{
-                                width: '100%',
-                                padding: '8px 12px',
-                                borderRadius: '8px',
-                                border: '1px solid #cbd5e1',
-                                background: '#ffffff',
-                                fontSize: '13px',
-                                color: '#0f172a',
-                                outline: 'none'
-                            }}
-                        >
-                            {ibVersions.map(v => (
-                                <option key={v.id} value={v.name}>{v.name}</option>
-                            ))}
-                        </select>
+                        <div style={{ display: 'flex', gap: '4px' }}>
+                            <select
+                                value={selectedIbVersionName}
+                                onChange={e => setSelectedIbVersionName(e.target.value)}
+                                style={{
+                                    flex: 1,
+                                    padding: '8px 12px',
+                                    borderRadius: '8px',
+                                    border: '1px solid #cbd5e1',
+                                    background: '#ffffff',
+                                    fontSize: '13px',
+                                    color: '#0f172a',
+                                    outline: 'none'
+                                }}
+                            >
+                                {displayIbVersions.map(v => (
+                                    <option key={v.id} value={v.name}>{v.name}</option>
+                                ))}
+                            </select>
+                            <button
+                                type="button"
+                                title="Add IB Version"
+                                onClick={() => {
+                                    const val = prompt('Enter new IB Version:');
+                                    if (val) handleAddOption('ibVersions', val);
+                                }}
+                                style={{ padding: '8px 10px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', cursor: 'pointer', fontWeight: 700, color: '#1d4ed8' }}
+                            >+</button>
+                            <button
+                                type="button"
+                                title="Remove Selected IB Version"
+                                onClick={() => {
+                                    if (selectedIbVersionName) handleRemoveOption('ibVersions', selectedIbVersionName);
+                                }}
+                                style={{ padding: '8px 10px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', cursor: 'pointer', fontWeight: 700, color: '#dc2626' }}
+                            >-</button>
+                        </div>
+                    </div>
+
+                    {/* Brand & Model */}
+                    <div>
+                        <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: '#475569', marginBottom: '5px' }}>
+                            Brand &amp; Model <span style={{ color: '#ef4444' }}>*</span>
+                        </label>
+                        <div style={{ display: 'flex', gap: '4px' }}>
+                            <select
+                                value={selectedBrandModel}
+                                onChange={e => setSelectedBrandModel(e.target.value)}
+                                style={{
+                                    flex: 1,
+                                    padding: '8px 12px',
+                                    borderRadius: '8px',
+                                    border: '1px solid #cbd5e1',
+                                    background: '#ffffff',
+                                    fontSize: '13px',
+                                    color: '#0f172a',
+                                    outline: 'none'
+                                }}
+                            >
+                                <option value="">Select Brand &amp; Model</option>
+                                {displayBrandModels.map(bm => (
+                                    <option key={bm} value={bm}>{bm}</option>
+                                ))}
+                            </select>
+                            <button
+                                type="button"
+                                title="Add Brand & Model"
+                                onClick={() => {
+                                    const val = prompt('Enter new Brand & Model:');
+                                    if (val) handleAddOption('brandModels', val);
+                                }}
+                                style={{ padding: '8px 10px', background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: '8px', cursor: 'pointer', fontWeight: 700, color: '#1d4ed8' }}
+                            >+</button>
+                            <button
+                                type="button"
+                                title="Remove Selected Brand & Model"
+                                onClick={() => {
+                                    if (selectedBrandModel) handleRemoveOption('brandModels', selectedBrandModel);
+                                }}
+                                style={{ padding: '8px 10px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', cursor: 'pointer', fontWeight: 700, color: '#dc2626' }}
+                            >-</button>
+                        </div>
                     </div>
                 </div>
 
@@ -606,6 +808,7 @@ const DataSources: React.FC<DataSourcesProps> = ({ onSelectFileForTab }) => {
                                 <th style={{ textAlign: 'left', padding: '10px 12px' }}>Region</th>
                                 <th style={{ textAlign: 'left', padding: '10px 12px' }}>Country</th>
                                 <th style={{ textAlign: 'left', padding: '10px 12px' }}>IB Version</th>
+                                <th style={{ textAlign: 'left', padding: '10px 12px' }}>Brand &amp; Model</th>
                                 <th style={{ textAlign: 'center', padding: '10px 12px' }}>Total Records</th>
                                 <th style={{ textAlign: 'center', padding: '10px 12px' }}>Status</th>
                                 <th style={{ textAlign: 'left', padding: '10px 14px' }}>Uploaded At</th>
@@ -615,14 +818,14 @@ const DataSources: React.FC<DataSourcesProps> = ({ onSelectFileForTab }) => {
                         <tbody>
                             {isLoadingFiles ? (
                                 <tr>
-                                    <td colSpan={9} style={{ textAlign: 'center', padding: '36px', color: '#64748b' }}>
+                                    <td colSpan={10} style={{ textAlign: 'center', padding: '36px', color: '#64748b' }}>
                                         <RefreshCw size={18} className="animate-spin" style={{ display: 'inline-block', marginBottom: '6px' }} />
                                         <div>Loading common uploads repository...</div>
                                     </td>
                                 </tr>
                             ) : filteredFiles.length === 0 ? (
                                 <tr>
-                                    <td colSpan={9} style={{ textAlign: 'center', padding: '40px 20px', color: '#64748b' }}>
+                                    <td colSpan={10} style={{ textAlign: 'center', padding: '40px 20px', color: '#64748b' }}>
                                         <FileSpreadsheet size={28} color="#94a3b8" style={{ marginBottom: '8px' }} />
                                         <div style={{ fontSize: '14px', fontWeight: 600, color: '#334155' }}>No common files found</div>
                                         <div style={{ fontSize: '12px', color: '#64748b', marginTop: '4px' }}>
@@ -678,6 +881,9 @@ const DataSources: React.FC<DataSourcesProps> = ({ onSelectFileForTab }) => {
                                                 }}>
                                                     {file.ib_version_name || 'IB 1.0'}
                                                 </span>
+                                            </td>
+                                            <td style={{ padding: '10px 12px', color: '#334155' }}>
+                                                {file.brand_model_name || '—'}
                                             </td>
                                             <td style={{ textAlign: 'center', padding: '10px 12px' }}>
                                                 <span className="modern-stat-chip total" style={{ fontSize: '11px', padding: '3px 8px' }}>

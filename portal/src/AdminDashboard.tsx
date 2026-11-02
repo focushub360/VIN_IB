@@ -1022,7 +1022,13 @@ const AdminDashboard: React.FC = () => {
                                 </div>
 
                                 {/* Table */}
-                                <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 'calc(100vh - 300px)', WebkitOverflowScrolling: 'touch', width: '100%' }}>
+                                <div style={{
+                                    overflowX: 'auto',
+                                    overflowY: 'auto',
+                                    maxHeight: 'max(200px, calc(100vh - 300px))',  // ← use max()
+                                    WebkitOverflowScrolling: 'touch',
+                                    width: '100%'
+                                }}>
                                     <table className="modern-table">
                                         <thead>
                                             <tr>
@@ -1301,7 +1307,14 @@ const AdminDashboard: React.FC = () => {
                                         </div>
                                     </div>
                                 </div>
-                                <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 'calc(100vh - 450px)', width: '100%', WebkitOverflowScrolling: 'touch', willChange: 'transform' }}>
+                                <div style={{
+                                    overflowX: 'auto',
+                                    overflowY: 'auto',
+                                    maxHeight: 'max(200px, calc(100vh - 450px))',
+                                    width: '100%',
+                                    WebkitOverflowScrolling: 'touch',
+                                    willChange: 'transform'
+                                }}>
                                     <table style={{ width: 'max-content', borderCollapse: 'collapse', fontSize: '13px', tableLayout: 'fixed' }}>
                                         <thead style={{ background: 'var(--color-surface-2)', position: 'sticky', top: 0, zIndex: 10 }}>
                                             <tr>
@@ -1543,7 +1556,14 @@ const AdminDashboard: React.FC = () => {
                                         )}
                                     </div>
                                 </div>
-                                <div style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: 'calc(100vh - 450px)', width: '100%', WebkitOverflowScrolling: 'touch', willChange: 'transform' }}>
+                                <div style={{
+                                    overflowX: 'auto',
+                                    overflowY: 'auto',
+                                    maxHeight: 'max(200px, calc(100vh - 450px))',
+                                    width: '100%',
+                                    WebkitOverflowScrolling: 'touch',
+                                    willChange: 'transform'
+                                }}>
                                     <table style={{ width: 'max-content', borderCollapse: 'collapse', fontSize: '13px', tableLayout: 'fixed' }}>
                                         <thead style={{ background: 'var(--color-surface-2)', position: 'sticky', top: 0, zIndex: 10 }}>
                                             <tr>

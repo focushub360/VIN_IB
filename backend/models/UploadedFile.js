@@ -1,56 +1,54 @@
-const { DataTypes } = require('sequelize');
-const sequelize = require('../database');
+const mongoose = require('mongoose');
 
-const UploadedFile = sequelize.define('UploadedFile', {
-    id: {
-        type: DataTypes.INTEGER,
-        primaryKey: true,
-        autoIncrement: true
-    },
+const uploadedFileSchema = new mongoose.Schema({
     file_name: {
-        type: DataTypes.STRING,
-        allowNull: false
+        type: String,
+        required: true
     },
     region_name: {
-        type: DataTypes.STRING,
-        allowNull: false,
-        defaultValue: 'General'
+        type: String,
+        required: true,
+        default: 'General'
     },
     country_name: {
-        type: DataTypes.STRING,
-        allowNull: false,
-        defaultValue: 'General'
+        type: String,
+        required: true,
+        default: 'General'
     },
     ib_version_name: {
-        type: DataTypes.STRING,
-        allowNull: false,
-        defaultValue: 'IB 1.0'
+        type: String,
+        required: true,
+        default: 'IB 1.0'
+    },
+    brand_model_name: {
+        type: String,
+        default: 'General'
     },
     total_records: {
-        type: DataTypes.INTEGER,
-        allowNull: false,
-        defaultValue: 0
+        type: Number,
+        required: true,
+        default: 0
     },
     status: {
-        type: DataTypes.STRING,
-        allowNull: false,
-        defaultValue: 'processed'
+        type: String,
+        required: true,
+        default: 'processed'
     },
     is_common: {
-        type: DataTypes.BOOLEAN,
-        allowNull: false,
-        defaultValue: true
+        type: Boolean,
+        required: true,
+        default: true
     },
     parsed_json: {
-        type: DataTypes.JSON, // Stores { columns: [...], rows: [...] }
-        allowNull: true
+        type: mongoose.Schema.Types.Mixed,
+        default: null
     },
     file_path: {
-        type: DataTypes.STRING,
-        allowNull: true
+        type: String,
+        default: null
     }
 }, {
     timestamps: true
 });
 
-module.exports = UploadedFile;
+module.exports = mongoose.model('UploadedFile', uploadedFileSchema);

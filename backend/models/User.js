@@ -1,33 +1,35 @@
-const { DataTypes } = require('sequelize');
-const sequelize = require('../database');
+const mongoose = require('mongoose');
 
-const User = sequelize.define('User', {
+const userSchema = new mongoose.Schema({
     username: {
-        type: DataTypes.STRING,
-        allowNull: false,
+        type: String,
+        required: true,
         unique: true
     },
     password: {
-        type: DataTypes.STRING,
-        allowNull: false
+        type: String,
+        required: true
     },
     plain_password: {
-        type: DataTypes.STRING,
-        allowNull: true // Optional, only for tenants/mechanics we want to view
+        type: String,
+        default: null
     },
     role: {
-        type: DataTypes.ENUM('super_admin', 'tenant', 'mechanic', 'sub_tenant'),
-        allowNull: false
+        type: String,
+        enum: ['super_admin', 'tenant', 'mechanic', 'sub_tenant'],
+        required: true
     },
-    // For mechanics, this points to their Tenant. For Tenants, this points to Super Admin (optional).
     parentId: {
-        type: DataTypes.INTEGER,
-        allowNull: true
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        default: null
     },
     permissions: {
-        type: DataTypes.JSON, // { viewMechanics: true, viewVin: false, ... }
-        allowNull: true
+        type: mongoose.Schema.Types.Mixed,
+        default: null
     }
+}, {
+    timestamps: true
 });
 
-module.exports = User;
+module.exports = mongoose.model('User', userSchema);

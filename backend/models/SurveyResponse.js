@@ -1,65 +1,58 @@
-const { DataTypes } = require('sequelize');
-const sequelize = require('../database');
+const mongoose = require('mongoose');
 
-const SurveyResponse = sequelize.define('SurveyResponse', {
-    id: {
-        type: DataTypes.INTEGER,
-        primaryKey: true,
-        autoIncrement: true
-    },
+const surveyResponseSchema = new mongoose.Schema({
     upload_id: {
-        type: DataTypes.INTEGER,
-        allowNull: false
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'UploadedFile',
+        required: true
     },
     row_index: {
-        type: DataTypes.INTEGER,
-        allowNull: false,
-        defaultValue: 0
+        type: Number,
+        required: true,
+        default: 0
     },
     vin: {
-        type: DataTypes.STRING,
-        allowNull: true
+        type: String,
+        default: null
     },
     stamped_vin: {
-        type: DataTypes.STRING,
-        allowNull: true
+        type: String,
+        default: null
     },
     survey_date: {
-        type: DataTypes.STRING,
-        allowNull: true
+        type: String,
+        default: null
     },
     surveyor_name: {
-        type: DataTypes.STRING,
-        allowNull: true
+        type: String,
+        default: null
     },
     user_name: {
-        type: DataTypes.STRING,
-        allowNull: true
+        type: String,
+        default: null
     },
     nps_score: {
-        type: DataTypes.FLOAT,
-        allowNull: true
+        type: Number,
+        default: null
     },
     sentiment: {
-        type: DataTypes.STRING,
-        allowNull: true
+        type: String,
+        default: null
     },
     status: {
-        type: DataTypes.STRING,
-        allowNull: false,
-        defaultValue: 'Valid'
+        type: String,
+        required: true,
+        default: 'Valid'
     },
     full_data: {
-        type: DataTypes.JSON, // Stores column letters mapping: { A: "...", T: "...", EP: "Yes" }
-        allowNull: true,
-        defaultValue: {}
+        type: mongoose.Schema.Types.Mixed,
+        default: {}
     }
 }, {
-    timestamps: true,
-    indexes: [
-        { fields: ['upload_id'] },
-        { fields: ['upload_id', 'row_index'] }
-    ]
+    timestamps: true
 });
 
-module.exports = SurveyResponse;
+surveyResponseSchema.index({ upload_id: 1 });
+surveyResponseSchema.index({ upload_id: 1, row_index: 1 });
+
+module.exports = mongoose.model('SurveyResponse', surveyResponseSchema);

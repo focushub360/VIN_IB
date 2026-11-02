@@ -1,0 +1,56 @@
+/* ==========================================================================
+   layoutSize.css
+   One place to control the overall size / density of the dashboard UI.
+   Import AFTER Dashboard.css (see App.tsx) so these rules win.
+   ========================================================================== */
+
+:root {
+    /* 1.0 = original size | 0.9 = slightly smaller | 0.85 = recommended | 0.8 = compact */
+    --ui-zoom: 0.85;
+
+    /* Spacing tokens used by the overrides below */
+    --layout-header-pad-y: 8px;
+    --layout-header-pad-x: 20px;
+    --layout-content-pad: 1rem;
+    --layout-panel-pad: 12px 16px;
+    --layout-logo-height: 44px;
+}
+
+/* ---- Overall scale (applies to every tab inside the dashboard) ---- */
+.dashboard-layout {
+    zoom: var(--ui-zoom);
+    min-height: calc(100vh / var(--ui-zoom));
+    /* avoids a gap at the bottom */
+}
+
+/* ---- Header ---- */
+.glossy-header {
+    padding: var(--layout-header-pad-y) var(--layout-header-pad-x);
+}
+
+.glossy-header img {
+    height: var(--layout-logo-height) !important;
+}
+
+/* ---- Page content padding ---- */
+.content {
+    padding: var(--layout-content-pad);
+}
+
+/* ---- Panels / cards ---- */
+.glass-panel {
+    padding: var(--layout-panel-pad);
+}
+
+/* ---- Buttons ---- */
+.modern-btn {
+    padding: 5px 10px;
+    font-size: 12px;
+}
+
+/* ---- Tables ---- */
+.modern-table th,
+.modern-table td {
+    padding: 6px 10px;
+    font-size: 12px;
+}

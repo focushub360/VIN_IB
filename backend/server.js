@@ -19,6 +19,8 @@ const { GUINEA_COLUMNS_449, GUINEA_COLUMN_DEFS, orderColumns, orderColumnNames }
 const { POSITIVE_DRIVER_L2_TO_L3, mapPositiveDrivers } = require('./shared/positiveDrivers');
 const { mapNegativeDetractors } = require('./shared/negativeDetractors');
 const { mapWorkshopDrivers } = require('./shared/workshopDrivers');
+const { connectMongo } = require('./mongo');
+const CustomMasterData = require('./models/CustomMasterData');
 
 
 const app = express();
@@ -348,7 +350,34 @@ function buildCFields(row = {}, index = 0) {
     };
 }
 // Middleware
-app.use(cors());
+// ============================================================
+// CORS — only allow the configured frontend origin(s)
+// ============================================================
+const FRONTEND_URL = process.env.FRONTEND_URL
+    ? process.env.FRONTEND_URL.split(',').map(u => u.trim()).filter(Boolean)
+    : ['http://localhost:5173', 'http://localhost:3000'];
+
+console.log('✅ CORS allowed origins:', FRONTEND_URL);
+
+app.use(cors({
+    origin: (origin, callback) => {
+        // Allow server-to-server / curl / Postman (no Origin header)
+        if (!origin) return callback(null, true);
+
+        if (FRONTEND_URL.includes(origin)) {
+            return callback(null, true);
+        }
+
+        console.warn(`❌ Blocked by CORS: ${origin}`);
+        return callback(new Error(`Not allowed by CORS: ${origin}`));
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+// Handle preflight (OPTIONS) requests for all routes
+app.options('*', cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
@@ -415,20 +444,10 @@ const IB_VERSIONS = [
     { id: 4, name: 'IB 3.0 (449-Col Guinea)' }
 ];
 
-// Database Sync & Seeding
-sequelize.sync().then(async () => {
-    console.log('Database synced');
-
-    // Safety check: Ensure plain_password column exists (fixes SQLite sync issues)
-    try {
-        await sequelize.query("ALTER TABLE Users ADD COLUMN plain_password VARCHAR(255);");
-        console.log("Added plain_password column");
-    } catch (e) {
-        // Ignore error if column already exists
-    }
-
+// Database Seeding for MongoDB
+async function seedDefaults() {
     // Create Default Super Admin if not exists
-    const admin = await User.findOne({ where: { role: 'super_admin' } });
+    const admin = await User.findOne({ role: 'super_admin' });
     if (!admin) {
         const hashedPassword = await bcrypt.hash('admin123', 10);
         await User.create({
@@ -439,24 +458,9 @@ sequelize.sync().then(async () => {
         console.log('Super Admin created: admin / admin123');
     }
 
-    const fileCount = await UploadedFile.count();
-    if (fileCount === 0) {
-        await UploadedFile.create({
-            file_name: 'Guinea_TGW_Survey_Master.xlsx',
-            region_name: 'Africa',
-            country_name: 'Guinea',
-            ib_version_name: 'IB 3.0 (449-Col Guinea)',
-            total_records: 0,
-            status: 'processed',
-            is_common: true,
-            parsed_json: {
-                columns: GUINEA_COLUMNS_449,
-                rows: []
-            }
-        });
-        console.log('Sample common file seeded: Guinea_TGW_Survey_Master.xlsx');
-    }
-});
+    const fileCount = await UploadedFile.countDocuments();
+
+}
 
 // --- ROUTES ---
 
@@ -480,6 +484,81 @@ app.get('/api/countries', (req, res) => {
 // Master Data: IB Versions
 app.get('/api/ib-versions', (req, res) => {
     res.json(IB_VERSIONS);
+});
+
+
+
+app.get('/api/master-data/custom', async (req, res) => {
+    try {
+        const allData = await CustomMasterData.find().lean();
+
+        // Format it back into the expected structure
+        const formatted = {
+            regions: allData.filter(d => d.type === 'regions').map(d => d.value),
+            countries: allData.filter(d => d.type === 'countries').map(d => d.value),
+            ibVersions: allData.filter(d => d.type === 'ibVersions').map(d => d.value),
+            brandModels: allData.filter(d => d.type === 'brandModels').map(d => d.value)
+        };
+
+        res.json(formatted);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// ADD a new custom value
+app.post('/api/master-data/custom', async (req, res) => {
+    try {
+        const { type, value } = req.body;
+
+        const validTypes = ['regions', 'countries', 'ibVersions', 'brandModels'];
+        if (!validTypes.includes(type) || !value) {
+            return res.status(400).json({ error: 'Invalid type or value' });
+        }
+
+        // Insert if it doesn't exist (upsert)
+        await CustomMasterData.updateOne(
+            { type, value: value.trim() },
+            { $setOnInsert: { type, value: value.trim() } },
+            { upsert: true }
+        );
+
+        // Fetch the updated full list to return to the frontend
+        const allData = await CustomMasterData.find().lean();
+        const formatted = {
+            regions: allData.filter(d => d.type === 'regions').map(d => d.value),
+            countries: allData.filter(d => d.type === 'countries').map(d => d.value),
+            ibVersions: allData.filter(d => d.type === 'ibVersions').map(d => d.value),
+            brandModels: allData.filter(d => d.type === 'brandModels').map(d => d.value)
+        };
+
+        res.json({ success: true, data: formatted });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// DELETE a custom value
+app.delete('/api/master-data/custom/:type/:value', async (req, res) => {
+    try {
+        const { type, value } = req.params;
+        const decodedValue = decodeURIComponent(value);
+
+        await CustomMasterData.deleteOne({ type, value: decodedValue });
+
+        // Fetch the updated full list
+        const allData = await CustomMasterData.find().lean();
+        const formatted = {
+            regions: allData.filter(d => d.type === 'regions').map(d => d.value),
+            countries: allData.filter(d => d.type === 'countries').map(d => d.value),
+            ibVersions: allData.filter(d => d.type === 'ibVersions').map(d => d.value),
+            brandModels: allData.filter(d => d.type === 'brandModels').map(d => d.value)
+        };
+
+        res.json({ success: true, data: formatted });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // Safe upload middleware that handles multipart or JSON and catches any multer errors
@@ -506,6 +585,7 @@ app.post('/api/uploads', handleUpload, async (req, res) => {
             region_name = 'Africa',
             country_name = 'Guinea',
             ib_version_name = 'IB 3.0 (449-Col Guinea)',
+            brand_model_name = 'General',
             total_records,
             columns,
             rows,
@@ -537,6 +617,7 @@ app.post('/api/uploads', handleUpload, async (req, res) => {
             region_name,
             country_name,
             ib_version_name,
+            brand_model_name: brand_model_name || 'General',
             total_records: count,
             status: 'processed',
             is_common: is_common === undefined ? true : (is_common === 'true' || is_common === true),
@@ -553,6 +634,7 @@ app.post('/api/uploads', handleUpload, async (req, res) => {
                 region_name: uploadedDoc.region_name,
                 country_name: uploadedDoc.country_name,
                 ib_version_name: uploadedDoc.ib_version_name,
+                brand_model_name: uploadedDoc.brand_model_name || 'General',
                 total_records: uploadedDoc.total_records,
                 status: uploadedDoc.status,
                 is_common: uploadedDoc.is_common,
@@ -565,49 +647,54 @@ app.post('/api/uploads', handleUpload, async (req, res) => {
     }
 });
 
-// GET /api/uploads/common - List all common uploads (lightweight, no heavy parsed_json)
 app.get('/api/uploads/common', async (req, res) => {
     try {
-        const files = await UploadedFile.findAll({
-            where: { is_common: true },
-            attributes: ['id', 'file_name', 'region_name', 'country_name', 'ib_version_name', 'total_records', 'status', 'is_common', 'createdAt'],
-            order: [['createdAt', 'DESC']]
-        });
+        const files = await UploadedFile.find({ is_common: true })
+            .select('file_name region_name country_name ib_version_name brand_model_name total_records status is_common createdAt')
+            .sort({ createdAt: -1 })
+            .lean();
+
         const mapped = files.map(f => ({
-            id: f.id,
+            id: f._id.toString(),          // ⚠️ THE FIX — id must be a string
             file_name: f.file_name,
             region_name: f.region_name,
             country_name: f.country_name,
             ib_version_name: f.ib_version_name,
+            brand_model_name: f.brand_model_name || 'General',
             total_records: f.total_records,
             status: f.status,
             is_common: f.is_common,
             created_at: f.createdAt
         }));
+
         res.json(mapped);
     } catch (err) {
         console.error('Get common uploads error:', err);
         res.status(500).json({ error: err.message });
     }
 });
-
-// GET /api/uploads/:id/data - Retrieve parsed columns and rows for a specific upload
 app.get('/api/uploads/:id/data', async (req, res) => {
     try {
-        const file = await UploadedFile.findByPk(req.params.id);
-        if (!file) {
-            return res.status(404).json({ error: 'File not found' });
+        // ⚠️ ADD THESE — reject bad IDs before they crash Mongo
+        if (!/^[a-fA-F0-9]{24}$/.test(req.params.id)) {
+            return res.status(400).json({ error: 'Invalid upload ID', received: req.params.id });
         }
+
+        const file = await UploadedFile.findById(req.params.id);
+        if (!file) return res.status(404).json({ error: 'File not found' });
+
         let parsed = file.parsed_json || { columns: [], rows: [] };
         if (typeof parsed === 'string') {
             try { parsed = JSON.parse(parsed); } catch (e) { parsed = { columns: [], rows: [] }; }
         }
+
         res.json({
-            id: file.id,
+            id: file._id.toString(),   // ⚠️ ADD THIS
             file_name: file.file_name,
             region_name: file.region_name,
             country_name: file.country_name,
             ib_version_name: file.ib_version_name,
+            brand_model_name: file.brand_model_name || 'General',
             total_records: file.total_records,
             columns: parsed.columns || [],
             rows: parsed.rows || []
@@ -771,20 +858,34 @@ app.put('/api/uploads/:id/data', async (req, res) => {
 });
 
 // DELETE /api/uploads/:id - Remove an upload
+// DELETE /api/uploads/:id - Remove an upload
 app.delete('/api/uploads/:id', async (req, res) => {
     try {
-        const file = await UploadedFile.findByPk(req.params.id);
-        if (!file) return res.status(404).json({ error: 'File not found' });
-        if (file.file_path && fs.existsSync(file.file_path)) {
-            try { fs.unlinkSync(file.file_path); } catch (e) {}
+        // 1. Validate the ID format first
+        if (!/^[a-fA-F0-9]{24}$/.test(req.params.id)) {
+            return res.status(400).json({ error: 'Invalid upload ID', received: req.params.id });
         }
-        await file.destroy();
+
+        // 2. Fetch with Mongoose (findById, not findByPk)
+        const file = await UploadedFile.findById(req.params.id);
+        if (!file) return res.status(404).json({ error: 'File not found' });
+
+        // 3. Remove the physical file from disk if it exists
+        if (file.file_path && fs.existsSync(file.file_path)) {
+            try { fs.unlinkSync(file.file_path); } catch (e) {
+                console.warn('Could not remove file from disk:', e.message);
+            }
+        }
+
+        // 4. Delete the document from MongoDB
+        await UploadedFile.deleteOne({ _id: req.params.id });
+
         res.json({ success: true, message: 'Deleted file successfully' });
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error('Delete upload error:', err);
+        res.status(500).json({ error: err.message || 'Failed to delete file' });
     }
 });
-
 // Reference Routes: POST /api/references, GET /api/references, GET /api/references/:id
 app.post('/api/references', async (req, res) => {
     try {
@@ -803,14 +904,22 @@ app.post('/api/references', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
-
 app.get('/api/references', async (req, res) => {
     try {
-        const refs = await SavedReference.findAll({
-            attributes: ['id', 'name', 'region_name', 'country_name', 'ib_version_name', 'total_records', 'createdAt'],
-            order: [['createdAt', 'DESC']]
-        });
-        res.json(refs);
+        const refs = await SavedReference.find()
+            .select('name region_name country_name ib_version_name total_records createdAt')
+            .sort({ createdAt: -1 })
+            .lean();
+
+        res.json(refs.map(r => ({
+            id: r._id.toString(),
+            name: r.name,
+            region_name: r.region_name,
+            country_name: r.country_name,
+            ib_version_name: r.ib_version_name,
+            total_records: r.total_records,
+            created_at: r.createdAt
+        })));
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -818,14 +927,19 @@ app.get('/api/references', async (req, res) => {
 
 app.get('/api/references/:id', async (req, res) => {
     try {
-        const ref = await SavedReference.findByPk(req.params.id);
+        if (!/^[a-fA-F0-9]{24}$/.test(req.params.id)) {
+            return res.status(400).json({ error: 'Invalid reference ID' });
+        }
+        const ref = await SavedReference.findById(req.params.id);
         if (!ref) return res.status(404).json({ error: 'Reference not found' });
+
         let parsed = ref.parsed_json || { columns: [], rows: [] };
         if (typeof parsed === 'string') {
             try { parsed = JSON.parse(parsed); } catch (e) { parsed = { columns: [], rows: [] }; }
         }
+
         res.json({
-            id: ref.id,
+            id: ref._id.toString(),
             name: ref.name,
             region_name: ref.region_name,
             country_name: ref.country_name,
@@ -838,17 +952,17 @@ app.get('/api/references/:id', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
-
 // Login
 app.post('/api/login', async (req, res) => {
     try {
         const { username, password } = req.body;
-        const user = await User.findOne({ where: { username } });
+        const user = await User.findOne({ username });
         if (!user || !await bcrypt.compare(password, user.password)) {
             return res.status(401).json({ error: 'Invalid credentials' });
         }
-        const token = jwt.sign({ id: user.id, role: user.role, username: user.username }, SECRET_KEY);
-        res.json({ token, role: user.role, id: user.id });
+        const userId = String(user._id);
+        const token = jwt.sign({ id: userId, role: user.role, username: user.username }, SECRET_KEY);
+        res.json({ token, role: user.role, id: userId });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -880,7 +994,7 @@ app.post('/api/tenants', authenticate, async (req, res) => {
             role: 'tenant',
             parentId: req.user.id
         });
-        res.json(tenant);
+        res.json(formatDoc(tenant));
     } catch (e) {
         res.status(400).json({ error: e.message });
     }
@@ -889,8 +1003,8 @@ app.post('/api/tenants', authenticate, async (req, res) => {
 // List Tenants (Super Admin Only)
 app.get('/api/tenants', authenticate, async (req, res) => {
     if (req.user.role !== 'super_admin') return res.status(403).json({ error: 'Access denied' });
-    const tenants = await User.findAll({ where: { role: 'tenant' } });
-    res.json(tenants);
+    const tenants = await User.find({ role: 'tenant' }).lean();
+    res.json(formatDocs(tenants));
 });
 
 // Create Mechanic (Tenant Only)
@@ -906,7 +1020,7 @@ app.post('/api/mechanics', authenticate, async (req, res) => {
             role: 'mechanic',
             parentId: req.user.id
         });
-        res.json(mechanic);
+        res.json(formatDoc(mechanic));
     } catch (e) {
         res.status(400).json({ error: e.message });
     }
@@ -915,31 +1029,141 @@ app.post('/api/mechanics', authenticate, async (req, res) => {
 // List Mechanics (Tenant Only)
 app.get('/api/mechanics', authenticate, async (req, res) => {
     if (req.user.role !== 'tenant') return res.status(403).json({ error: 'Access denied' });
-    const mechanics = await User.findAll({ where: { role: 'mechanic', parentId: req.user.id } });
-    res.json(mechanics);
+    const mechanics = await User.find({ role: 'mechanic', parentId: req.user.id }).lean();
+    res.json(formatDocs(mechanics));
 });
 
-// Update Mechanic (Tenant Only)
-app.put('/api/mechanics/:id', authenticate, async (req, res) => {
-    if (req.user.role !== 'tenant') return res.status(403).json({ error: 'Access denied' });
+app.put('/api/uploads/:id/data', async (req, res) => {
     try {
-        const { username, password } = req.body;
-        const mechanic = await User.findOne({ where: { id: req.params.id, parentId: req.user.id } });
-
-        if (!mechanic) return res.status(404).json({ error: 'Mechanic not found' });
-
-        if (username) mechanic.username = username;
-        if (password) {
-            console.log("UPDATING PASSWORD", password);
-            mechanic.password = await bcrypt.hash(password, 10);
-            mechanic.plain_password = password;
+        if (!/^[a-fA-F0-9]{24}$/.test(req.params.id)) {
+            return res.status(400).json({ error: 'Invalid upload ID', received: req.params.id });
         }
 
-        await mechanic.save();
-        console.log("SAVED MECHANIC", mechanic.toJSON());
-        res.json(mechanic);
-    } catch (e) {
-        res.status(400).json({ error: e.message });
+        const fileId = req.params.id;
+        const file = await UploadedFile.findById(fileId);
+        if (!file) return res.status(404).json({ error: 'File not found' });
+
+        const { rows, edits } = req.body;
+
+        let parsed = file.parsed_json || { columns: [], rows: [] };
+        if (typeof parsed === 'string') {
+            try { parsed = JSON.parse(parsed); } catch (e) { parsed = { columns: [], rows: [] }; }
+        }
+
+        // If updated rows are provided, update the cached rows
+        if (Array.isArray(rows)) {
+            parsed.rows = rows;
+            file.total_records = rows.length;
+        }
+
+        // Process individual targeted edits if provided
+        if (Array.isArray(edits) && edits.length > 0) {
+            for (const edit of edits) {
+                const { rowIndex, column, value, columnLetter } = edit;
+                const letter = columnLetter || getColumnLetter(column);
+
+                if (parsed.rows && parsed.rows[rowIndex]) {
+                    parsed.rows[rowIndex][column] = value;
+                    if (letter) parsed.rows[rowIndex][letter] = value;
+                }
+
+                // Find matching SurveyResponse (Mongoose findOne — no where:)
+                let surveyResp = await SurveyResponse.findOne({
+                    upload_id: file._id,
+                    row_index: rowIndex
+                });
+
+                const metaUpdates = {};
+                if (/vin no/i.test(column) || column === 'vin') metaUpdates.vin = String(value || '');
+                else if (/stamped/i.test(column)) metaUpdates.stamped_vin = String(value || '');
+                else if (/survey date/i.test(column)) metaUpdates.survey_date = String(value || '');
+                else if (/surveyor name/i.test(column)) metaUpdates.surveyor_name = String(value || '');
+                else if (/user name/i.test(column)) metaUpdates.user_name = String(value || '');
+                else if (/likely to recommend/i.test(column) || column === 'nps_score') {
+                    const num = Number(value);
+                    metaUpdates.nps_score = !isNaN(num) ? num : null;
+                    metaUpdates.sentiment = num >= 9 ? 'Promoter' : num >= 7 ? 'Passive' : 'Detractor';
+                }
+
+                if (surveyResp) {
+                    let fullData = surveyResp.full_data || {};
+                    if (typeof fullData === 'string') {
+                        try { fullData = JSON.parse(fullData); } catch (e) { fullData = {}; }
+                    }
+                    if (letter) fullData[letter] = value;
+                    fullData[column] = value;
+
+                    Object.assign(surveyResp, metaUpdates);
+                    surveyResp.full_data = fullData;
+                    surveyResp.markModified('full_data');
+                    await surveyResp.save();
+                } else {
+                    const fullData = {};
+                    if (letter) fullData[letter] = value;
+                    fullData[column] = value;
+                    await SurveyResponse.create({
+                        upload_id: file._id,
+                        row_index: rowIndex,
+                        ...metaUpdates,
+                        full_data: fullData
+                    });
+                }
+            }
+        } else if (Array.isArray(rows)) {
+            // Bulk sync SurveyResponse rows
+            for (let idx = 0; idx < rows.length; idx++) {
+                const r = rows[idx];
+                const fullData = {};
+                for (const colName of Object.keys(r)) {
+                    const letter = getColumnLetter(colName);
+                    if (letter) fullData[letter] = r[colName];
+                }
+
+                const npsVal = Number(r['2. Likely to recommend vehicle (0-10)'] ?? r['nps_score']);
+                const vinVal = r['VIN No. (Qualifying Question)'] || r['vin'] || '';
+                const dateVal = r['SURVEY DATE'] || r['Date'] || '';
+
+                const meta = {
+                    vin: vinVal,
+                    survey_date: dateVal,
+                    nps_score: !isNaN(npsVal) ? npsVal : null,
+                    sentiment: npsVal >= 9 ? 'Promoter' : npsVal >= 7 ? 'Passive' : 'Detractor',
+                    full_data: fullData
+                };
+
+                let existing = await SurveyResponse.findOne({
+                    upload_id: file._id,
+                    row_index: idx
+                });
+
+                if (existing) {
+                    Object.assign(existing, meta);
+                    existing.markModified('full_data');
+                    await existing.save();
+                } else {
+                    await SurveyResponse.create({
+                        upload_id: file._id,
+                        row_index: idx,
+                        ...meta
+                    });
+                }
+            }
+        }
+
+        // Save the UploadedFile (with markModified — not .changed)
+        file.parsed_json = parsed;
+        file.markModified('parsed_json');
+        await file.save();
+
+        res.json({
+            success: true,
+            message: 'Changes saved successfully to database',
+            file_id: file._id.toString(),
+            total_records: file.total_records
+        });
+    } catch (err) {
+        console.error('Update upload data error:', err);
+        res.status(500).json({ error: err.message || 'Failed to update data' });
     }
 });
 
@@ -947,8 +1171,8 @@ app.put('/api/mechanics/:id', authenticate, async (req, res) => {
 app.delete('/api/mechanics/:id', authenticate, async (req, res) => {
     if (req.user.role !== 'tenant') return res.status(403).json({ error: 'Access denied' });
     try {
-        const result = await User.destroy({ where: { id: req.params.id, parentId: req.user.id } });
-        if (result === 0) return res.status(404).json({ error: 'Mechanic not found' });
+        const result = await User.deleteOne({ _id: req.params.id, parentId: req.user.id });
+        if (result.deletedCount === 0) return res.status(404).json({ error: 'Mechanic not found' });
         res.json({ message: 'Deleted successfully' });
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -976,22 +1200,19 @@ app.post('/api/inspections', uploadFields, async (req, res) => {
 
         const inspection = await Inspection.create({
             vin,
-            gpsData: JSON.parse(gpsData || '{}'),
+            gpsData: typeof gpsData === 'string' ? JSON.parse(gpsData || '{}') : (gpsData || {}),
             mechanicId,
             vinImage,
             gpsImage,
             faultImage
         });
-        res.json(inspection);
+        res.json(formatDoc(inspection));
     } catch (e) {
         console.error(e);
         res.status(500).json({ error: e.message });
     }
 });
 
-// Associations
-User.hasMany(Inspection, { foreignKey: 'mechanicId' });
-Inspection.belongsTo(User, { foreignKey: 'mechanicId' });
 
 // Create Sub-Tenant (Tenant Only)
 app.post('/api/subtenants', authenticate, async (req, res) => {
@@ -1007,7 +1228,7 @@ app.post('/api/subtenants', authenticate, async (req, res) => {
             parentId: req.user.id,
             permissions: permissions || {}
         });
-        res.json(subTenant);
+        res.json(formatDoc(subTenant));
     } catch (e) {
         res.status(400).json({ error: e.message });
     }
@@ -1016,8 +1237,8 @@ app.post('/api/subtenants', authenticate, async (req, res) => {
 // List Sub-Tenants (Tenant Only)
 app.get('/api/subtenants', authenticate, async (req, res) => {
     if (req.user.role !== 'tenant') return res.status(403).json({ error: 'Access denied' });
-    const subTenants = await User.findAll({ where: { role: 'sub_tenant', parentId: req.user.id } });
-    res.json(subTenants);
+    const subTenants = await User.find({ role: 'sub_tenant', parentId: req.user.id }).lean();
+    res.json(formatDocs(subTenants));
 });
 
 // Analytics (Tenant Only)
@@ -1025,14 +1246,12 @@ app.get('/api/analytics', authenticate, async (req, res) => {
     if (req.user.role !== 'tenant') return res.status(403).json({ error: 'Access denied' });
     try {
         // Find mechanics
-        const mechanics = await User.findAll({ where: { parentId: req.user.id, role: 'mechanic' } });
+        const mechanics = await User.find({ parentId: req.user.id, role: 'mechanic' }).lean();
 
         // Aggregate data for each mechanic
         const data = await Promise.all(mechanics.map(async (m) => {
-            const count = await Inspection.count({ where: { mechanicId: m.id } });
-            // Calculate integrity (mock: random score based on images present)
-            // In real app, calculate % of inspections with all 3 images
-            const total = await Inspection.findAll({ where: { mechanicId: m.id } });
+            const count = await Inspection.countDocuments({ mechanicId: m._id });
+            const total = await Inspection.find({ mechanicId: m._id }).lean();
             const valid = total.filter(i => i.vinImage && i.gpsImage && i.faultImage).length;
             const integrity = total.length > 0 ? (valid / total.length) * 100 : 0;
 
@@ -1058,55 +1277,54 @@ app.get('/api/inspections', authenticate, async (req, res) => {
 
         // Permission Check for Sub-Tenant
         if (req.user.role === 'sub_tenant') {
-            const user = await User.findByPk(req.user.id);
-            const perms = JSON.parse(user.permissions || '{}');
-
-            // Should verify if sub_tenant can view anything at all, usually yes but restricted details
-            // Sub-tenant sees same data as Tenant (parent), but we mask fields later?
-            // For now, let's filter by Parent's mechanics
-            const mechanics = await User.findAll({ where: { parentId: user.parentId } });
-            const mechIds = mechanics.map(m => m.id);
-            where = { mechanicId: mechIds };
+            const user = await User.findById(req.user.id);
+            const mechanics = await User.find({ parentId: user.parentId }).lean();
+            const mechIds = mechanics.map(m => m._id);
+            where = { mechanicId: { $in: mechIds } };
 
         } else if (req.user.role === 'mechanic') {
             where = { mechanicId: req.user.id };
         } else if (req.user.role === 'tenant') {
-            const mechanics = await User.findAll({ where: { parentId: req.user.id } });
-            const mechIds = mechanics.map(m => m.id);
-            where = { mechanicId: mechIds };
+            const mechanics = await User.find({ parentId: req.user.id }).lean();
+            const mechIds = mechanics.map(m => m._id);
+            where = { mechanicId: { $in: mechIds } };
         } else if (req.user.role === 'super_admin') {
             // See all
         }
 
-        const inspections = await Inspection.findAll({
-            where,
-            include: [{
-                model: User,
-                attributes: ['username']
-            }],
-            order: [['createdAt', 'DESC']]
+        const inspections = await Inspection.find(where)
+            .populate('mechanicId', 'username')
+            .sort({ createdAt: -1 })
+            .lean();
+
+        const mapped = inspections.map(i => {
+            const obj = formatDoc(i);
+            if (i.mechanicId && typeof i.mechanicId === 'object') {
+                obj.User = { username: i.mechanicId.username };
+                obj.mechanicId = String(i.mechanicId._id || i.mechanicId.id);
+            }
+            return obj;
         });
 
         // Post-processing for Sub-Tenant Permissions
         if (req.user.role === 'sub_tenant') {
-            const user = await User.findByPk(req.user.id);
-            const perms = typeof user.permissions === 'string' ? JSON.parse(user.permissions) : user.permissions;
+            const user = await User.findById(req.user.id);
+            const perms = typeof user.permissions === 'string' ? JSON.parse(user.permissions || '{}') : (user.permissions || {});
 
-            const sanitized = inspections.map(i => {
-                const json = i.toJSON();
-                if (!perms.viewVin) json.vin = '***-MASKED-***';
+            const sanitized = mapped.map(json => {
+                const copy = { ...json };
+                if (!perms.viewVin) copy.vin = '***-MASKED-***';
                 if (!perms.viewLocation) {
-                    json.gpsData = null;
-                    json.gpsImage = null; // Hide map/gps image
+                    copy.gpsData = null;
+                    copy.gpsImage = null; // Hide map/gps image
                 }
-                if (!perms.viewTimestamp) json.createdAt = '---';
-                // if (!perms.viewMechanic) json.User = { username: 'Masked' };
-                return json;
+                if (!perms.viewTimestamp) copy.createdAt = '---';
+                return copy;
             });
             return res.json(sanitized);
         }
 
-        res.json(inspections);
+        res.json(mapped);
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -2664,6 +2882,14 @@ app.post('/api/analyze-pdf', upload.any(), async (req, res) => {
     }
 });
 
-app.listen(PORT, () => {
-    console.log(`Backend running on http://localhost:${PORT}`);
-});
+connectMongo()
+    .then(seedDefaults)
+    .then(() => {
+        app.listen(PORT, () => {
+            console.log(`Backend running on http://localhost:${PORT}`);
+        });
+    })
+    .catch(err => {
+        console.error("Failed to start server:", err);
+        process.exit(1);
+    });

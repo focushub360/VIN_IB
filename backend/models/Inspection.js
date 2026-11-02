@@ -1,31 +1,34 @@
-const { DataTypes } = require('sequelize');
-const sequelize = require('../database');
 
-const Inspection = sequelize.define('Inspection', {
+const mongoose = require('mongoose');
+
+const InspectionSchema = new mongoose.Schema({
     vin: {
-        type: DataTypes.STRING,
-        allowNull: false
+        type: String,
+        required: true
     },
     vinImage: {
-        type: DataTypes.STRING,
-        allowNull: true
+        type: String,
+        default: null
     },
     gpsImage: {
-        type: DataTypes.STRING,
-        allowNull: true
+        type: String,
+        default: null
     },
     faultImage: {
-        type: DataTypes.STRING,
-        allowNull: true
+        type: String,
+        default: null
     },
     gpsData: {
-        type: DataTypes.JSON, // Stores lat, long, time, address
-        allowNull: true
+        type: mongoose.Schema.Types.Mixed,   // stores lat, long, time, address
+        default: {}
     },
     mechanicId: {
-        type: DataTypes.INTEGER,
-        allowNull: false
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User',
+        required: true
     }
+}, {
+    timestamps: true
 });
 
-module.exports = Inspection;
+module.exports = mongoose.model('Inspection', InspectionSchema);
