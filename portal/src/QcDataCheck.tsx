@@ -1989,7 +1989,127 @@ function computeExistingCounts(rows: Record<string, any>[], columns: string[]): 
 interface QcDataCheckProps {
     onNavigateToDataSources?: () => void;
 }
+function hasSameNeighbor(
+    rows: Record<string, any>[],
+    r: number,
+    col: string,
+    value: string
+): boolean {
+    const v = value.trim().toLowerCase();
+    const up = r > 0 ? rows[r - 1][col] : '';
+    const down = r < rows.length - 1 ? rows[r + 1][col] : '';
+    return (
+        (!isEmptyCell(up) && String(up).trim().toLowerCase() === v) ||
+        (!isEmptyCell(down) && String(down).trim().toLowerCase() === v)
+    );
+}
+function dedupeL2Columns(
+    rows: Record<string, any>[],
+    l2SlotCols: string[],
+    idxToName: Record<string, string>,
+    onAdded: (rowIdx: number, l2: string) => void
+): { swapped: number; added: number; unresolved: number } {
+    const MAX_L2_PER_ROW = 4;
+    const norm = (v: any) => String(v ?? '').trim().toLowerCase();
+    const shuffled = <T,>(arr: T[]) => {
+        const a = [...arr];
+        for (let i = a.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [a[i], a[j]] = [a[j], a[i]];
+        }
+        return a;
+    };
+    const swapAutoFlag = (row: Record<string, any>, c1: string, c2: string) => {
+        const set = ensureAutoVerbatimSet(row);
+        const a = set.has(c1);
+        const b = set.has(c2);
+        set.delete(c1);
+        set.delete(c2);
+        if (b) set.add(c1);
+        if (a) set.add(c2);
+    };
 
+    let swapped = 0;
+    let added = 0;
+    let unresolved = 0;
+    if (l2SlotCols.length === 0) return { swapped, added, unresolved };
+
+    const firstSlot = l2SlotCols[0];
+
+    // A) Make sure the FIRST L2 column (DF) is filled: move a value from another slot into it
+    for (let r = 0; r < rows.length; r++) {
+        const row = rows[r];
+        if (!isEmptyCell(row[firstSlot])) continue;
+        const donors = shuffled(l2SlotCols.slice(1).filter(c => !isEmptyCell(row[c])));
+        const from = donors.find(c => !hasSameNeighbor(rows, r, firstSlot, String(row[c])));
+        if (!from) continue;
+        row[firstSlot] = row[from];
+        row[from] = '';
+        swapAutoFlag(row, firstSlot, from);
+    }
+
+    // B) Remove same-value-above/below in every L2 column
+    for (let pass = 0; pass < 5; pass++) {
+        let changed = false;
+        unresolved = 0;
+
+        for (let r = 0; r < rows.length; r++) {
+            const row = rows[r];
+
+            for (const col of l2SlotCols) {
+                const v = row[col];
+                if (isEmptyCell(v)) continue;
+                if (!hasSameNeighbor(rows, r, col, String(v))) continue;
+
+                // 1) swap with another L2 in the SAME row (Brake <-> Vibration)
+                const others = shuffled(
+                    l2SlotCols.filter(c2 => c2 !== col && !isEmptyCell(row[c2]) && norm(row[c2]) !== norm(v))
+                );
+                const swapWith = others.find(c2 =>
+                    !hasSameNeighbor(rows, r, col, String(row[c2])) &&
+                    !hasSameNeighbor(rows, r, c2, String(v))
+                );
+                if (swapWith) {
+                    const tmp = row[col];
+                    row[col] = row[swapWith];
+                    row[swapWith] = tmp;
+                    swapAutoFlag(row, col, swapWith);
+                    swapped++;
+                    changed = true;
+                    continue;
+                }
+
+                // 2) row has only this L2: put a different L2 here, move the original to another empty slot
+                const rowVals = new Set(l2SlotCols.filter(c => !isEmptyCell(row[c])).map(c => norm(row[c])));
+                const filledCount = rowVals.size;
+                if (filledCount < MAX_L2_PER_ROW) {
+                    const newL2 = shuffled(L2_GROUPS).find(g =>
+                        !rowVals.has(norm(g)) && !hasSameNeighbor(rows, r, col, g)
+                    );
+                    const emptySlot = shuffled(l2SlotCols.filter(c => isEmptyCell(row[c])))
+                        .find(c => !hasSameNeighbor(rows, r, c, String(v)));
+                    if (newL2 && emptySlot) {
+                        row[emptySlot] = v;
+                        row[col] = newL2;
+                        const set = ensureAutoVerbatimSet(row);
+                        set.add(emptySlot);
+                        set.add(col);
+                        fillOneRandomFollowUpForL2(row, newL2, idxToName);
+                        onAdded(r, newL2);
+                        added++;
+                        changed = true;
+                        continue;
+                    }
+                }
+
+                unresolved++;
+            }
+        }
+        if (!changed) break;
+    }
+
+    return { swapped, added, unresolved };
+}
 // =============================================================
 // MAIN COMPONENT
 // =============================================================
@@ -2947,87 +3067,100 @@ const QcDataCheck: React.FC<QcDataCheckProps> = ({ onNavigateToDataSources }) =>
             const addedProdPosByRow = new Set<number>();
 
             if (mode === 'add') {
-                // ── PRODUCT L2 FILL (Sequential First Slot, Random Remaining) ────
-                for (const [l2Name, enteredRaw] of Object.entries(payload.l2Weights || {})) {
-                    const requested = Math.floor(Number(enteredRaw) || 0);
-                    if (requested <= 0 || !L2_GROUPS.includes(l2Name)) continue;
+                // ── PRODUCT L2 FILL (shuffled L2s, shuffled rows, shuffled slots) ──
+                {
+                    const MAX_L2_PER_ROW = 4;
+                    const n = newRows.length;
 
-                    const allL2Cols = l2SlotCols;
-                    const firstSlot = allL2Cols[0]; // DF
-                    let fillsDone = 0;
-
-                    // Pass 1: Fill the FIRST slot (DF) sequentially row-by-row
-                    for (let r = 0; r < newRows.length; r++) {
-                        if (fillsDone >= requested) break;
-                        const row = newRows[r];
-
-                        let alreadyHasThisL2 = false;
-                        let currentL2Count = 0;
-                        for (const c of allL2Cols) {
-                            if (!isEmptyCell(row[c])) {
-                                currentL2Count++;
-                                if (String(row[c]).toLowerCase() === l2Name.toLowerCase()) alreadyHasThisL2 = true;
-                            }
+                    const shuffle = <T,>(arr: T[]) => {
+                        for (let i = arr.length - 1; i > 0; i--) {
+                            const j = Math.floor(Math.random() * (i + 1));
+                            [arr[i], arr[j]] = [arr[j], arr[i]];
                         }
+                    };
 
-                        if (!alreadyHasThisL2 && currentL2Count < 4 && isEmptyCell(row[firstSlot])) {
-                            row[firstSlot] = l2Name;
-                            ensureAutoVerbatimSet(row).add(firstSlot);
-                            fillOneRandomFollowUpForL2(row, l2Name, idxToName);
-                            markL2Added(r, l2Name);
-                            fillsDone++;
-                        }
+                    // 1. queue of every requested L2
+                    const l2Queue: string[] = [];
+                    for (const [l2Name, enteredRaw] of Object.entries(payload.l2Weights || {})) {
+                        const requested = Math.floor(Number(enteredRaw) || 0);
+                        if (requested <= 0 || !L2_GROUPS.includes(l2Name)) continue;
+                        for (let i = 0; i < requested; i++) l2Queue.push(l2Name);
                     }
+                    shuffle(l2Queue);
 
-                    // Pass 2: Remaining fills — pick a random empty slot from DG..EM
-                    if (fillsDone < requested) {
-                        const remainingSlots = allL2Cols.slice(1); // DG..EM
+                    // 2. random row order, each pass visits every row once, then reshuffles
+                    let rowOrder: number[] = [];
+                    let ptr = 0;
+                    const refill = () => {
+                        rowOrder = Array.from({ length: n }, (_, i) => i);
+                        shuffle(rowOrder);
+                        ptr = 0;
+                    };
+                    refill();
 
-                        for (let r = 0; r < newRows.length; r++) {
-                            if (fillsDone >= requested) break;
+                    let l2NotPlaced = 0;
+                    for (const l2Name of l2Queue) {
+                        const lowerL2 = l2Name.toLowerCase();
+                        let placed = false;
+
+                        for (let step = 0; step < n; step++) {
+                            if (ptr >= n) refill();
+                            const r = rowOrder[ptr++];
                             const row = newRows[r];
 
-                            let alreadyHasThisL2 = false;
-                            let currentL2Count = 0;
-                            for (const c of allL2Cols) {
+                            let count = 0;
+                            let has = false;
+                            for (const c of l2SlotCols) {
                                 if (!isEmptyCell(row[c])) {
-                                    currentL2Count++;
-                                    if (String(row[c]).toLowerCase() === l2Name.toLowerCase()) alreadyHasThisL2 = true;
+                                    count++;
+                                    if (String(row[c]).trim().toLowerCase() === lowerL2) has = true;
                                 }
                             }
+                            if (has || count >= MAX_L2_PER_ROW) continue;
 
-                            if (alreadyHasThisL2 || currentL2Count >= 4) continue;
+                            // any empty slot DF..EM, in random order, skipping slots where a neighbour row has the same L2
+                            const slots = l2SlotCols.filter(c => isEmptyCell(row[c]));
+                            shuffle(slots);
+                            const targetCol = slots.find(c => !hasSameNeighbor(newRows, r, c, l2Name));
+                            if (!targetCol) continue;
 
-                            const emptySlots = remainingSlots.filter(c => isEmptyCell(row[c]));
-                            if (emptySlots.length === 0) continue;
-
-                            const targetCol = emptySlots[Math.floor(Math.random() * emptySlots.length)];
                             row[targetCol] = l2Name;
                             ensureAutoVerbatimSet(row).add(targetCol);
                             fillOneRandomFollowUpForL2(row, l2Name, idxToName);
                             markL2Added(r, l2Name);
-                            fillsDone++;
+                            placed = true;
+                            break;
                         }
+                        if (!placed) l2NotPlaced++;
+                    }
+                    if (l2NotPlaced > 0) {
+                        console.warn(`[L2 fill] ${l2NotPlaced} requested fills could not be placed.`);
                     }
                 }
 
-                // ── Auto-fill remaining (Add mode only) ──────────────────────
                 if (payload.autoFillRemaining) {
                     for (let r = 0; r < totalRows; r++) {
                         const state = getRowL2State(newRows[r]);
-                        if (state.filledSlotCount > 0) continue; // row already has ≥1 L2
+                        if (state.filledSlotCount > 0) continue;
 
                         const emptySlots = l2SlotCols.slice(0, 4).filter(c => isEmpty(newRows[r][c]));
                         if (emptySlots.length === 0) continue;
-
-                        const randomL2 = pick(L2_GROUPS);
                         const targetCol = emptySlots[0];
+
+                        // pick an L2 that doesn't match the neighbours in that column
+                        const options = L2_GROUPS.filter(g => !hasSameNeighbor(newRows, r, targetCol, g));
+                        const randomL2 = pick(options.length ? options : L2_GROUPS);
+
                         newRows[r][targetCol] = randomL2;
+                        ensureAutoVerbatimSet(newRows[r]).add(targetCol);
                         fillOneRandomFollowUpForL2(newRows[r], randomL2, idxToName);
                         markL2Added(r, randomL2);
                     }
                 }
-
+                const dd = dedupeL2Columns(newRows, l2SlotCols, idxToName, markL2Added);
+                if (dd.unresolved > 0) {
+                    console.warn(`[L2 dedupe] ${dd.unresolved} cells still repeat above/below.`);
+                }
                 // ── PRODUCT POSITIVE DRIVERS (row-by-row, max 4 per row) ──────────
                 {
                     const MAX_DRIVERS_PER_ROW = 4;
