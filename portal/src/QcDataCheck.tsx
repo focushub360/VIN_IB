@@ -25,6 +25,7 @@ import { NPS_CELL_OPTIONS } from './npsCellOptions';
 import { QC_FOLLOWUP_OPTIONS } from './shared/QcDropdownTree';
 import { WeightageModal } from './WeightageModal';
 import type { ExistingCounts } from './WeightageModal';
+
 import {
     L2_GROUPS,
     POSITIVE_DRIVERS,
@@ -36,7 +37,13 @@ import {
     WORKSHOP_POSITIVE_L2_TO_COL,
     WORKSHOP_POSITIVE_L2_TO_L3,
     WORKSHOP_NEGATIVE_L2_TO_COL,
-    WORKSHOP_NEGATIVE_L2_TO_L3
+    WORKSHOP_NEGATIVE_L2_TO_L3,
+    findWorkshopDriverForVerbatim,
+    findWorkshopDriverForPhrase,
+    pickWorkshopVerbatimForDriver,
+    pickWorkshopNegVerbatimForDriver,
+    findWorkshopNegDriverForText,
+    WORKSHOP_NEGATIVE_VERBATIMS_BY_DRIVER
 } from './shared/workshopDrivers';
 import { getExcelColumnLetter } from './guineaSchema';
 import {
@@ -61,7 +68,11 @@ import {
     DETRACTOR_POOLS
 } from './verbatimPools';
 import { NEGATIVE_TREE, ISSUE_COLUMN_RANGE_MAPPING } from './shared/negativeDetractors';
-import { POSITIVE_DRIVER_L2_TO_L3 } from './positiveDrivers';
+import {
+    POSITIVE_DRIVER_L2_TO_L3,
+    findDriverForVerbatim,
+    pickVerbatimForDriver
+} from './positiveDrivers';
 
 /**
  * Maps an L2 complaint group name → the matching positive driver key used in
@@ -825,6 +836,30 @@ function fillColumnsVertically(
     return fillsDone;
 }
 
+function pickWsNegForRow(
+    row: Record<string, any>,
+    verbCols: string[],
+    usedInCol: Set<string>
+): string | null {
+    const lower = (s: any) => String(s || '').trim().toLowerCase();
+    const usedInRow = new Set(verbCols.map(c => lower(row[c])).filter(Boolean));
+
+    // negative drivers that already have a verbatim in this row
+    const covered = new Set<string>();
+    for (const c of verbCols) {
+        if (isEmptyCell(row[c])) continue;
+        const d = findWorkshopNegDriverForText(String(row[c]));
+        if (d) covered.add(d);
+    }
+
+    for (const [l2, driverCol] of Object.entries(WORKSHOP_NEGATIVE_L2_TO_COL)) {
+        if (isEmptyCell(row[driverCol]) || covered.has(l2)) continue;
+        const v = pickWorkshopNegVerbatimForDriver(l2, usedInRow, usedInCol);
+        if (v) return v;
+    }
+    return null;
+}
+
 function applyServiceVerbatimsColumnFirst(
     newRows: Record<string, any>[],
     addedPosByRow: Set<number>,
@@ -836,24 +871,24 @@ function applyServiceVerbatimsColumnFirst(
         WORK_POS_COLS,
         999999,
         (row, col, usedInCol) => {
-            const usedInRow = new Set(WORK_POS_COLS.map(c => String(row[c] || '').trim().toLowerCase()));
-            let matchedPhrase = '';
-            for (const driverCol of Object.values(WORKSHOP_POSITIVE_L2_TO_COL)) {
-                const cellVal = row[driverCol];
-                if (!isEmptyCell(cellVal)) {
-                    const strVal = String(cellVal).trim();
-                    if (!usedInCol.has(strVal) && !usedInCol.has(strVal.toLowerCase()) && !usedInRow.has(strVal.toLowerCase())) {
-                        matchedPhrase = strVal;
-                        break;
-                    }
-                }
+            const lower = (s: any) => String(s || '').trim().toLowerCase();
+            const usedInRow = new Set(WORK_POS_COLS.map(c => lower(row[c])).filter(Boolean));
+
+            // drivers that already have a 3a phrase
+            const covered = new Set<string>();
+            for (const c of WORK_POS_COLS) {
+                if (isEmptyCell(row[c])) continue;
+                const d = findWorkshopDriverForVerbatim(String(row[c])) || findWorkshopDriverForPhrase(String(row[c]));
+                if (d) covered.add(d);
             }
-            if (matchedPhrase) return matchedPhrase;
-            const flatPool = flattenPool(WORKSHOP_POSITIVE_L2_TO_L3);
-            const available = flatPool.filter(p => !usedInCol.has(p) && !usedInCol.has(p.trim().toLowerCase()) && !usedInRow.has(p.trim().toLowerCase()));
-            return available.length > 0
-                ? available[Math.floor(Math.random() * available.length)]
-                : (flatPool.length > 0 ? flatPool[Math.floor(Math.random() * flatPool.length)] : null);
+
+            // next filled driver column with no 3a phrase yet
+            for (const [l2, driverCol] of Object.entries(WORKSHOP_POSITIVE_L2_TO_COL)) {
+                if (isEmptyCell(row[driverCol]) || covered.has(l2)) continue;
+                const v = pickWorkshopVerbatimForDriver(l2, usedInRow, usedInCol);
+                if (v) return v;
+            }
+            return null;
         },
         (row) => {
             if (getWorkshopTier(row) !== 'positive') return false;
@@ -870,26 +905,7 @@ function applyServiceVerbatimsColumnFirst(
         newRows,
         WORK_SOFT_NEG_COLS,
         999999,
-        (row, col, usedInCol) => {
-            const usedInRow = new Set(WORK_SOFT_NEG_COLS.map(c => String(row[c] || '').trim().toLowerCase()));
-            let matchedPhrase = '';
-            for (const driverCol of Object.values(WORKSHOP_NEGATIVE_L2_TO_COL)) {
-                const cellVal = row[driverCol];
-                if (!isEmptyCell(cellVal)) {
-                    const strVal = String(cellVal).trim();
-                    if (!usedInCol.has(strVal) && !usedInCol.has(strVal.toLowerCase()) && !usedInRow.has(strVal.toLowerCase())) {
-                        matchedPhrase = strVal;
-                        break;
-                    }
-                }
-            }
-            if (matchedPhrase) return matchedPhrase;
-            const flatPool = flattenPool(WORKSHOP_NEGATIVE_L2_TO_L3);
-            const available = flatPool.filter(p => !usedInCol.has(p) && !usedInCol.has(p.trim().toLowerCase()) && !usedInRow.has(p.trim().toLowerCase()));
-            return available.length > 0
-                ? available[Math.floor(Math.random() * available.length)]
-                : (flatPool.length > 0 ? flatPool[Math.floor(Math.random() * flatPool.length)] : null);
-        },
+        (row, col, usedInCol) => pickWsNegForRow(row, WORK_SOFT_NEG_COLS, usedInCol),
         (row) => {
             if (getWorkshopTier(row) !== 'positive') return false;
             const rIdx = row.__idx;
@@ -905,26 +921,7 @@ function applyServiceVerbatimsColumnFirst(
         newRows,
         WORK_HARD_NEG_COLS,
         999999,
-        (row, col, usedInCol) => {
-            const usedInRow = new Set(WORK_HARD_NEG_COLS.map(c => String(row[c] || '').trim().toLowerCase()));
-            let matchedPhrase = '';
-            for (const driverCol of Object.values(WORKSHOP_NEGATIVE_L2_TO_COL)) {
-                const cellVal = row[driverCol];
-                if (!isEmptyCell(cellVal)) {
-                    const strVal = String(cellVal).trim();
-                    if (!usedInCol.has(strVal) && !usedInCol.has(strVal.toLowerCase()) && !usedInRow.has(strVal.toLowerCase())) {
-                        matchedPhrase = strVal;
-                        break;
-                    }
-                }
-            }
-            if (matchedPhrase) return matchedPhrase;
-            const flatPool = flattenPool(WORKSHOP_NEGATIVE_L2_TO_L3);
-            const available = flatPool.filter(p => !usedInCol.has(p) && !usedInCol.has(p.trim().toLowerCase()) && !usedInRow.has(p.trim().toLowerCase()));
-            return available.length > 0
-                ? available[Math.floor(Math.random() * available.length)]
-                : (flatPool.length > 0 ? flatPool[Math.floor(Math.random() * flatPool.length)] : null);
-        },
+        (row, col, usedInCol) => pickWsNegForRow(row, WORK_HARD_NEG_COLS, usedInCol),
         (row) => {
             if (getWorkshopTier(row) !== 'negative') return false;
             const rIdx = row.__idx;
@@ -948,24 +945,24 @@ function applyProductVerbatimsColumnFirst(
         PROD_POS_COLS,
         999999,
         (row, col, usedInCol) => {
-            const usedInRow = new Set(PROD_POS_COLS.map(c => String(row[c] || '').trim().toLowerCase()));
-            let matchedPhrase = '';
-            for (const driverCol of Object.values(POSITIVE_DRIVER_COLUMNS)) {
-                const cellVal = row[driverCol];
-                if (!isEmptyCell(cellVal)) {
-                    const strVal = String(cellVal).trim();
-                    if (!usedInCol.has(strVal) && !usedInCol.has(strVal.toLowerCase()) && !usedInRow.has(strVal.toLowerCase())) {
-                        matchedPhrase = strVal;
-                        break;
-                    }
-                }
+            const lower = (s: any) => String(s || '').trim().toLowerCase();
+            const usedInRow = new Set(PROD_POS_COLS.map(c => lower(row[c])).filter(Boolean));
+
+            // drivers that already have a 3a phrase in this row
+            const covered = new Set<string>();
+            for (const c of PROD_POS_COLS) {
+                if (isEmptyCell(row[c])) continue;
+                const d = findDriverForVerbatim(String(row[c])) || findDriverForPhrase(String(row[c]));
+                if (d) covered.add(d);
             }
-            if (matchedPhrase) return matchedPhrase;
-            const flatPool = flattenPool(POSITIVE_DRIVER_L2_TO_L3);
-            const available = flatPool.filter(p => !usedInCol.has(p) && !usedInCol.has(p.trim().toLowerCase()) && !usedInRow.has(p.trim().toLowerCase()));
-            return available.length > 0
-                ? available[Math.floor(Math.random() * available.length)]
-                : (flatPool.length > 0 ? flatPool[Math.floor(Math.random() * flatPool.length)] : null);
+
+            // next filled driver with no 3a phrase yet
+            for (const driverCol of Object.values(POSITIVE_DRIVER_COLUMNS)) {
+                if (isEmptyCell(row[driverCol]) || covered.has(driverCol)) continue;
+                const v = pickVerbatimForDriver(driverCol, usedInRow, usedInCol);
+                if (v) return v;
+            }
+            return null;
         },
         (row) => {
             const tier = readProductTier(row);
@@ -1209,7 +1206,7 @@ function getL2FollowUpColumns(
     if (!matchedKey) {
         matchedKey = Object.keys(ISSUE_COLUMN_RANGE_MAPPING).find(
             k => cleanL2.toLowerCase().includes(k.trim().toLowerCase()) ||
-                 k.trim().toLowerCase().includes(cleanL2.toLowerCase())
+                k.trim().toLowerCase().includes(cleanL2.toLowerCase())
         );
     }
     if (!matchedKey) return [];
@@ -2680,7 +2677,7 @@ const QcDataCheck: React.FC<QcDataCheckProps> = ({ onNavigateToDataSources }) =>
             if (nm) l2SlotCols.push(nm);
         }
 
-        const newRows = rows.map((r, i) => ({
+        const newRows: Record<string, any>[] = rows.map((r, i) => ({
             ...r,
             __idx: i,
             __autoVerbatim: new Set<string>(
@@ -2704,80 +2701,92 @@ const QcDataCheck: React.FC<QcDataCheckProps> = ({ onNavigateToDataSources }) =>
             const addedNegativeByRow = new Set<number>();
 
             if (mode === 'add') {
-                // Service Positive Drivers (OK..OW)
-                for (const [driverName, enteredRaw] of Object.entries(payload.servicePositiveWeights || {})) {
-                    const requested = Math.floor(Number(enteredRaw) || 0);
-                    if (requested <= 0) continue;
+                // ── SERVICE DRIVERS (shuffled drivers AND shuffled rows, max 3 per row) ──
+                {
+                    const MAX_DRIVERS_PER_ROW = 3;
+                    type Item = { kind: 'pos' | 'neg'; name: string };
+                    const queue: Item[] = [];
 
-                    const colName = WORKSHOP_POSITIVE_L2_TO_COL[driverName];
-                    if (!colName || !columns.includes(colName)) continue;
+                    for (const [name, raw] of Object.entries(payload.servicePositiveWeights || {})) {
+                        const cnt = Math.floor(Number(raw) || 0);
+                        const col = WORKSHOP_POSITIVE_L2_TO_COL[name];
+                        if (cnt <= 0 || !col || !columns.includes(col)) continue;
+                        if (!(WORKSHOP_POSITIVE_L2_TO_L3[name] || []).length) continue;
+                        for (let i = 0; i < cnt; i++) queue.push({ kind: 'pos', name });
+                    }
+                    for (const [name, raw] of Object.entries(payload.serviceNegativeWeights || {})) {
+                        const cnt = Math.floor(Number(raw) || 0);
+                        const col = WORKSHOP_NEGATIVE_L2_TO_COL[name];
+                        if (cnt <= 0 || !col || !columns.includes(col)) continue;
+                        if (!(WORKSHOP_NEGATIVE_L2_TO_L3[name] || []).length) continue;
+                        for (let i = 0; i < cnt; i++) queue.push({ kind: 'neg', name });
+                    }
 
-                    const pool = WORKSHOP_POSITIVE_L2_TO_L3[driverName] || [];
-
-                    fillColumnsVertically(
-                        newRows,
-                        [colName],
-                        requested,
-                        (row, col, usedInCol) => {
-                            const available = pool.filter(v => !usedInCol.has(v) && !usedInCol.has(v.trim().toLowerCase()));
-                            return available.length > 0
-                                ? available[Math.floor(Math.random() * available.length)]
-                                : (pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null);
-                        },
-                        (row) => {
-                            if (getWorkshopTier(row) !== 'positive') return false;
-                            let driverColsFilled = 0;
-                            for (const c of Object.values(WORKSHOP_POSITIVE_L2_TO_COL)) {
-                                if (!isEmptyCell(row[c])) driverColsFilled++;
-                            }
-                            for (const c of Object.values(WORKSHOP_NEGATIVE_L2_TO_COL)) {
-                                if (!isEmptyCell(row[c])) driverColsFilled++;
-                            }
-                            return driverColsFilled < 3;
-                        },
-                        (row, rIdx) => {
-                            addedPositiveByRow.add(rIdx);
+                    const shuffle = <T,>(arr: T[]) => {
+                        for (let i = arr.length - 1; i > 0; i--) {
+                            const j = Math.floor(Math.random() * (i + 1));
+                            [arr[i], arr[j]] = [arr[j], arr[i]];
                         }
-                    );
-                }
+                    };
+                    shuffle(queue);
 
-                // Service Negative Drivers (OX..PL)
-                for (const [driverName, enteredRaw] of Object.entries(payload.serviceNegativeWeights || {})) {
-                    const requested = Math.floor(Number(enteredRaw) || 0);
-                    if (requested <= 0) continue;
+                    const n = newRows.length;
+                    const tier: ('positive' | 'negative' | null)[] = new Array(n);
+                    const used: number[] = new Array(n);
+                    for (let r = 0; r < n; r++) {
+                        tier[r] = getWorkshopTier(newRows[r]);
+                        used[r] = countFilledDrivers(newRows[r], WORKSHOP_POSITIVE_L2_TO_COL)
+                            + countFilledDrivers(newRows[r], WORKSHOP_NEGATIVE_L2_TO_COL);
+                    }
 
-                    const colName = WORKSHOP_NEGATIVE_L2_TO_COL[driverName];
-                    if (!colName || !columns.includes(colName)) continue;
+                    // Random row order. Each pass visits every row once, then reshuffles
+                    let rowOrder: number[] = [];
+                    let ptr = 0;
+                    const refill = () => {
+                        rowOrder = Array.from({ length: n }, (_, i) => i);
+                        shuffle(rowOrder);
+                        ptr = 0;
+                    };
+                    refill();
 
-                    const pool = WORKSHOP_NEGATIVE_L2_TO_L3[driverName] || [];
+                    let notPlaced = 0;
+                    for (const item of queue) {
+                        const col = item.kind === 'pos'
+                            ? WORKSHOP_POSITIVE_L2_TO_COL[item.name]
+                            : WORKSHOP_NEGATIVE_L2_TO_COL[item.name];
+                        const oppositeCol = item.kind === 'pos'
+                            ? WORKSHOP_NEGATIVE_L2_TO_COL[item.name]
+                            : WORKSHOP_POSITIVE_L2_TO_COL[item.name];
+                        const pool = item.kind === 'pos'
+                            ? WORKSHOP_POSITIVE_L2_TO_L3[item.name]
+                            : WORKSHOP_NEGATIVE_L2_TO_L3[item.name];
 
-                    fillColumnsVertically(
-                        newRows,
-                        [colName],
-                        requested,
-                        (row, col, usedInCol) => {
-                            const available = pool.filter(v => !usedInCol.has(v) && !usedInCol.has(v.trim().toLowerCase()));
-                            return available.length > 0
-                                ? available[Math.floor(Math.random() * available.length)]
-                                : (pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null);
-                        },
-                        (row) => {
-                            if (getWorkshopTier(row) === null) return false;
-                            let driverColsFilled = 0;
-                            for (const c of Object.values(WORKSHOP_POSITIVE_L2_TO_COL)) {
-                                if (!isEmptyCell(row[c])) driverColsFilled++;
-                            }
-                            for (const c of Object.values(WORKSHOP_NEGATIVE_L2_TO_COL)) {
-                                if (!isEmptyCell(row[c])) driverColsFilled++;
-                            }
-                            return driverColsFilled < 3;
-                        },
-                        (row, rIdx) => {
-                            addedNegativeByRow.add(rIdx);
+                        let placed = false;
+                        for (let step = 0; step < n; step++) {
+                            if (ptr >= n) refill();
+                            const r = rowOrder[ptr++];
+
+                            if (tier[r] === null) continue;
+                            if (item.kind === 'pos' && tier[r] !== 'positive') continue;
+                            if (used[r] >= MAX_DRIVERS_PER_ROW) continue;
+
+                            const row = newRows[r];
+                            if (!isEmptyCell(row[col])) continue;                       // already has this driver
+                            if (oppositeCol && !isEmptyCell(row[oppositeCol])) continue; // don't praise and complain about the same L2
+
+                            row[col] = pool[Math.floor(Math.random() * pool.length)];
+                            ensureAutoVerbatimSet(row).add(col);
+                            used[r]++;
+                            (item.kind === 'pos' ? addedPositiveByRow : addedNegativeByRow).add(r);
+                            placed = true;
+                            break;
                         }
-                    );
+                        if (!placed) notPlaced++;
+                    }
+                    if (notPlaced > 0) {
+                        console.warn(`[Service fill] ${notPlaced} requested fills could not be placed.`);
+                    }
                 }
-
                 // Auto-fill remaining (only in Add mode)
                 if (payload.autoFillRemaining) {
                     const posKeys = Object.keys(WORKSHOP_POSITIVE_L2_TO_COL);
@@ -3019,36 +3028,73 @@ const QcDataCheck: React.FC<QcDataCheckProps> = ({ onNavigateToDataSources }) =>
                     }
                 }
 
-                // ── POSITIVE DRIVER FILL (AU..BM) ─────────────────────────────
-                for (const [colName, enteredRaw] of Object.entries(payload.positiveWeights || {})) {
-                    const requested = Math.floor(Number(enteredRaw) || 0);
-                    if (requested <= 0) continue;
+                // ── PRODUCT POSITIVE DRIVERS (row-by-row, max 4 per row) ──────────
+                {
+                    const MAX_DRIVERS_PER_ROW = 4;
 
-                    const targetCol = POSITIVE_DRIVER_COLUMNS[colName] || (columns.includes(colName) ? colName : null);
-                    if (!targetCol || !columns.includes(targetCol)) continue;
+                    const queue: string[] = [];
+                    for (const [driverName, enteredRaw] of Object.entries(payload.positiveWeights || {})) {
+                        const requested = Math.floor(Number(enteredRaw) || 0);
+                        const col = POSITIVE_DRIVER_COLUMNS[driverName];
+                        if (requested <= 0 || !col || !columns.includes(col)) continue;
+                        if (!(POSITIVE_DRIVER_L2_TO_L3[driverName] || []).length) continue;
+                        for (let i = 0; i < requested; i++) queue.push(driverName);
+                    }
 
-                    const pool = POSITIVE_DRIVER_L2_TO_L3[colName] || [];
+                    // Fisher–Yates shuffle
+                    for (let i = queue.length - 1; i > 0; i--) {
+                        const j = Math.floor(Math.random() * (i + 1));
+                        [queue[i], queue[j]] = [queue[j], queue[i]];
+                    }
 
-                    fillColumnsVertically(
-                        newRows,
-                        [targetCol],
-                        requested,
-                        (row, col, usedInCol) => {
-                            const available = pool.filter(v => !usedInCol.has(v) && !usedInCol.has(v.trim().toLowerCase()));
-                            return available.length > 0
-                                ? available[Math.floor(Math.random() * available.length)]
-                                : (pool.length > 0 ? pool[Math.floor(Math.random() * pool.length)] : null);
-                        },
-                        (row) => {
-                            const pRating = readProductRating(row);
-                            return pRating !== 'detractor';
-                        },
-                        (row, rIdx) => {
-                            addedProdPosByRow.add(rIdx);
+                    const n = newRows.length;
+                    const eligible: boolean[] = new Array(n);
+                    const driverCount: number[] = new Array(n);
+                    const filled3a: number[] = new Array(n);
+                    for (let r = 0; r < n; r++) {
+                        eligible[r] = readProductRating(newRows[r]) !== 'detractor';
+                        driverCount[r] = countFilledDrivers(newRows[r], POSITIVE_DRIVER_COLUMNS);
+                        filled3a[r] = countFilledVerbatims(newRows[r], PROD_POS_COLS);
+                    }
+
+                    let cursor = 0;
+                    for (const driverName of queue) {
+                        const col = POSITIVE_DRIVER_COLUMNS[driverName];
+                        const pool = POSITIVE_DRIVER_L2_TO_L3[driverName];
+
+                        for (let step = 0; step < n; step++) {
+                            const r = (cursor + step) % n;
+                            if (!eligible[r]) continue;
+                            if (driverCount[r] >= MAX_DRIVERS_PER_ROW) continue;
+                            if (filled3a[r] !== driverCount[r]) continue;      // keep driver count == 3a count
+
+                            const row = newRows[r];
+                            if (!isEmptyCell(row[col])) continue;
+
+                            const empty3a = PROD_POS_COLS.filter(c => isEmptyCell(row[c]));
+                            if (empty3a.length === 0) continue;
+
+                            const usedInRow = new Set(
+                                PROD_POS_COLS.map(c => String(row[c] || '').trim().toLowerCase()).filter(Boolean)
+                            );
+                            const verbatim = pickVerbatimForDriver(driverName, usedInRow);
+                            if (!verbatim) continue;
+
+                            // AU..BM cell: standard L3 phrase
+                            row[col] = pool[Math.floor(Math.random() * pool.length)];
+                            ensureAutoVerbatimSet(row).add(col);
+
+                            // 3a cell: matching phrase from the new pool
+                            row[empty3a[0]] = verbatim;
+                            ensureAutoVerbatimSet(row).add(empty3a[0]);
+
+                            driverCount[r]++;
+                            filled3a[r]++;
+                            cursor = (r + 1) % n;
+                            break;
                         }
-                    );
+                    }
                 }
-
                 // ── Column-First Product Verbatim Fill ─────────────────────────
                 applyProductVerbatimsColumnFirst(newRows, addedProdPosByRow, addedL2sByRow, l2SlotCols);
             } else {

@@ -66,6 +66,102 @@ export const WORKSHOP_POSITIVE_L2_TO_L3: Record<string, string[]> = {
     "Clear Communication"
   ]
 };
+export const WORKSHOP_POSITIVE_VERBATIMS_BY_DRIVER: Record<string, string[]> = {
+  "Resolution of Problem": [
+    "Issues fixed in the first visit",
+    "Problem solved quickly",
+    "Complaints resolved properly",
+    "Fixed right the first time"
+  ],
+  "Parts availability": [
+    "Spare parts available at workshop",
+    "Genuine parts always in stock",
+    "No waiting for parts"
+  ],
+  "Skilled Manpower": [
+    "Skilled technicians available in workshop",
+    "Knowledgeable service staff",
+    "Experienced mechanics",
+    "Staff understand the vehicle well"
+  ],
+  "Washing Quality": [
+    "Vehicle washed nicely",
+    "Returned clean and shiny",
+    "Good wash and polish finish"
+  ],
+  "Service Adviser Behavior": [
+    "Service adviser listened attentively",
+    "Adviser was polite and helpful",
+    "Staff behaviour is friendly",
+    "Adviser was well presented"
+  ],
+  "Cost & Explanation": [
+    "Reasonable cost with clear explanation",
+    "Charges are fair",
+    "Bill explained clearly",
+    "Work details shared properly"
+  ],
+  "Warranty Policy": [
+    "Easy warranty process",
+    "Warranty claim accepted without fuss",
+    "Battery and tyre warranty honoured",
+    "Warranty support is good"
+  ],
+  "Waiting Time": [
+    "Job card opened quickly",
+    "Vehicle delivered on time",
+    "Billing done fast",
+    "Service completed quickly"
+  ],
+  "Customer Lounge Amenities": [
+    "Comfortable customer lounge with AC",
+    "Clean and comfortable waiting area",
+    "Refreshments and TV in lounge",
+    "Good wifi in the lounge"
+  ],
+  "Operating Hours": [
+    "Workshop open on Sundays",
+    "Open late in the evening",
+    "Early morning opening is helpful"
+  ],
+  "Workshop Facilities": [
+    "Pick up & drop facility available",
+    "Express service available",
+    "Regular updates on WhatsApp",
+    "Roadside assistance available",
+    "Clear communication throughout"
+  ]
+};
+
+export const WS_VERBATIM_TO_DRIVER = new Map<string, string>();
+Object.entries(WORKSHOP_POSITIVE_VERBATIMS_BY_DRIVER).forEach(([l2, list]) =>
+  list.forEach(p => WS_VERBATIM_TO_DRIVER.set(p.trim().toLowerCase(), l2)));
+
+const WS_L3_TO_DRIVER = new Map<string, string>();
+Object.entries(WORKSHOP_POSITIVE_L2_TO_L3).forEach(([l2, list]) =>
+  list.forEach(p => WS_L3_TO_DRIVER.set(p.trim().toLowerCase(), l2)));
+
+export function findWorkshopDriverForVerbatim(phrase: string): string | null {
+  return WS_VERBATIM_TO_DRIVER.get(String(phrase || '').trim().toLowerCase()) || null;
+}
+// for old rows whose 3a text is a plain L3 phrase
+export function findWorkshopDriverForPhrase(phrase: string): string | null {
+  return WS_L3_TO_DRIVER.get(String(phrase || '').trim().toLowerCase()) || null;
+}
+
+export function pickWorkshopVerbatimForDriver(
+  l2: string,
+  usedInRow: Set<string>,
+  usedInCol?: Set<string>
+): string | null {
+  const pool = WORKSHOP_POSITIVE_VERBATIMS_BY_DRIVER[l2] || [];
+  if (pool.length === 0) return null;
+  const lower = (s: string) => s.trim().toLowerCase();
+  const fresh = pool.filter(p => !usedInRow.has(lower(p)) && !(usedInCol && usedInCol.has(lower(p))));
+  const notInRow = pool.filter(p => !usedInRow.has(lower(p)));
+  const choices = fresh.length ? fresh : notInRow;
+  return choices.length ? choices[Math.floor(Math.random() * choices.length)] : null;
+}
 
 export const WORKSHOP_POSITIVE_L2_TO_COL: Record<string, string> = {
   "Resolution of Problem": "Resolution of Problem is good",
@@ -292,3 +388,96 @@ export default {
   mapWorkshopDrivers,
   mulberry32
 };
+
+export const WORKSHOP_NEGATIVE_VERBATIMS_BY_DRIVER: Record<string, string[]> = {
+  "Resolution of Problem": [
+    "Issues not resolved even after repeated visits",
+    "Same problem keeps coming back",
+    "New problems after service",
+    "Complaint was ignored"
+  ],
+  "Parts availability": [
+    "Spare parts not available at workshop",
+    "Had to wait days for parts",
+    "Genuine parts out of stock"
+  ],
+  "Skilled Manpower": [
+    "Technicians not skilled enough",
+    "Staff lack knowledge",
+    "Mechanics could not find the fault",
+    "Inexperienced service staff"
+  ],
+  "Washing Quality": [
+    "Vehicle not washed properly",
+    "Polishing not done after wash",
+    "Returned dirty after service"
+  ],
+  "Service Adviser Behavior": [
+    "Service adviser was not listening",
+    "Service adviser behaved rudely",
+    "Adviser gave no proper answers",
+    "Adviser was not presentable"
+  ],
+  "Cost & Explanation": [
+    "Overcharging compared to estimate",
+    "Invoice not explained properly",
+    "Extra jobs added without asking",
+    "Parts prices are too high"
+  ],
+  "Warranty Policy": [
+    "Warranty not given in warranty period",
+    "Asked money for warranty replacement",
+    "Warranty claim rejected without reason",
+    "Battery warranty denied"
+  ],
+  "Waiting Time": [
+    "More waiting at job card opening",
+    "Delivery not on promised time",
+    "Billing takes too long",
+    "Service took too many hours"
+  ],
+  "Customer Lounge Amenities": [
+    "Comfortable seating not available in lounge",
+    "Lounge is dirty and hot",
+    "No drinking water or refreshments",
+    "No AC in the waiting area"
+  ],
+  "Operating Hours": [
+    "Sunday opening not available",
+    "Workshop closes too early",
+    "Opens too late in the morning"
+  ],
+  "Workshop Facilities": [
+    "Pick up & drop facility not available",
+    "Express service not available",
+    "No updates during service",
+    "Poor communication from workshop"
+  ]
+};
+
+const WS_NEG_VERBATIM_TO_DRIVER = new Map<string, string>();
+Object.entries(WORKSHOP_NEGATIVE_VERBATIMS_BY_DRIVER).forEach(([l2, list]) =>
+  list.forEach(p => WS_NEG_VERBATIM_TO_DRIVER.set(p.trim().toLowerCase(), l2)));
+
+const WS_NEG_L3_TO_DRIVER = new Map<string, string>();
+Object.entries(WORKSHOP_NEGATIVE_L2_TO_L3).forEach(([l2, list]) =>
+  list.forEach(p => WS_NEG_L3_TO_DRIVER.set(p.trim().toLowerCase(), l2)));
+
+export function findWorkshopNegDriverForText(phrase: string): string | null {
+  const k = String(phrase || '').trim().toLowerCase();
+  return WS_NEG_VERBATIM_TO_DRIVER.get(k) || WS_NEG_L3_TO_DRIVER.get(k) || null;
+}
+
+export function pickWorkshopNegVerbatimForDriver(
+  l2: string,
+  usedInRow: Set<string>,
+  usedInCol?: Set<string>
+): string | null {
+  const pool = WORKSHOP_NEGATIVE_VERBATIMS_BY_DRIVER[l2] || [];
+  if (pool.length === 0) return null;
+  const lower = (s: string) => s.trim().toLowerCase();
+  const fresh = pool.filter(p => !usedInRow.has(lower(p)) && !(usedInCol && usedInCol.has(lower(p))));
+  const notInRow = pool.filter(p => !usedInRow.has(lower(p)));
+  const choices = fresh.length ? fresh : notInRow;
+  return choices.length ? choices[Math.floor(Math.random() * choices.length)] : null;
+}

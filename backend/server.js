@@ -723,11 +723,13 @@ function getColumnLetter(colName) {
 // PUT /api/uploads/:id/data - Persist edited table cells back to SurveyResponse and UploadedFile
 app.put('/api/uploads/:id/data', async (req, res) => {
     try {
-        const fileId = req.params.id;
-        const file = await UploadedFile.findByPk(fileId);
-        if (!file) {
-            return res.status(404).json({ error: 'File not found' });
+        if (!/^[a-fA-F0-9]{24}$/.test(req.params.id)) {
+            return res.status(400).json({ error: 'Invalid upload ID', received: req.params.id });
         }
+
+        const fileId = req.params.id;
+        const file = await UploadedFile.findById(fileId); // ✅ Mongoose
+        if (!file) return res.status(404).json({ error: 'File not found' });
 
         const { rows, edits } = req.body;
         let parsed = file.parsed_json || { columns: [], rows: [] };
@@ -842,7 +844,7 @@ app.put('/api/uploads/:id/data', async (req, res) => {
         }
 
         file.parsed_json = parsed;
-        file.changed('parsed_json', true);
+        file.markModified('parsed_json');
         await file.save();
 
         res.json({

@@ -156,6 +156,160 @@ export const POSITIVE_DRIVER_L2_TO_L3: Record<string, string[]> = {
     ]
 };
 
+
+// 3a) phrases, keyed by the SAME driver names as POSITIVE_DRIVER_L2_TO_L3.
+// Style follows excellentPools. No phrase here equals a driver-cell phrase.
+export const POSITIVE_VERBATIMS_BY_DRIVER: Record<string, string[]> = {
+    "Brake": [
+        "Excellent braking response",
+        "Strong brake grip",
+        "Brakes stop confidently",
+        "Short stopping distance",
+        "Smooth brake feel"
+    ],
+    "Electrical": [
+        "Bright and clear headlamp",
+        "Long battery backup",
+        "Reliable electrical system",
+        "Loud clear horn",
+        "Easy self start",
+        "Accurate digital meter"
+    ],
+    "Engine": [
+        "Excellent engine reliability",
+        "Strong engine pickup",
+        "Refined engine performance",
+        "Effortless gear shifting",
+        "Engine runs trouble free",
+        "Responsive throttle"
+    ],
+    "Load": [
+        "Excellent load carrying ability",
+        "Handles heavy goods easily",
+        "Strong load bearing",
+        "Stable with full load"
+    ],
+    "Maintenance": [
+        "Very low upkeep cost",
+        "Cheap periodic service",
+        "Hassle-free maintenance",
+        "Minimal running expenses"
+    ],
+    "Mileage": [
+        "Excellent mileage in city",
+        "Outstanding fuel average",
+        "Very economical fuel usage",
+        "Consistent mileage on highway",
+        "Superb fuel savings"
+    ],
+    "Mirror": [
+        "Excellent rear visibility",
+        "Clear mirror view",
+        "Well-positioned mirrors",
+        "Vibration-free mirrors"
+    ],
+    "Vehicle": [
+        "Excellent overall performance",
+        "Reliable everyday ride",
+        "Solid build quality",
+        "Stable at high speed",
+        "Confident handling",
+        "Top speed is good"
+    ],
+    "Seat": [
+        "Excellent seat comfort",
+        "Soft cushioned seat",
+        "Comfortable for long rides",
+        "Spacious seating",
+        "Relaxed riding posture"
+    ],
+    "Sound": [
+        "Very quiet engine",
+        "Pleasant exhaust sound",
+        "Minimal engine noise",
+        "Silent operation"
+    ],
+    "Roof top (soft top)": [
+        "Excellent roof durability",
+        "Roof keeps rain out",
+        "Sturdy roof structure",
+        "Roof is easy to maintain"
+    ],
+    "Spare parts": [
+        "Excellent spare parts availability",
+        "Affordable genuine parts",
+        "Parts found easily nearby",
+        "Low spare part prices"
+    ],
+    "Style": [
+        "Stylish modern look",
+        "Attractive body design",
+        "Premium colour finish",
+        "Sporty appearance",
+        "Eye-catching graphics"
+    ],
+    "Suspension": [
+        "Excellent ride comfort",
+        "Strong shock absorbers",
+        "Handles potholes comfortably",
+        "Stable suspension on bad roads"
+    ],
+    "Tyre": [
+        "Excellent road grip",
+        "Long lasting tyres",
+        "Tyres perform well in rain",
+        "Low tyre wear"
+    ],
+    "Vehicle price": [
+        "Excellent value for price",
+        "Budget friendly purchase",
+        "Strong resale value",
+        "Fair price for features",
+        "Affordable running cost"
+    ],
+    "Income": [
+        "Excellent earning potential",
+        "Daily income is steady",
+        "Profitable for business",
+        "Good returns on trips"
+    ],
+    "Windshield": [
+        "Excellent wind protection",
+        "Clear visibility through windshield",
+        "Sturdy windshield",
+        "Keeps dust away"
+    ],
+    "Brand image": [
+        "Excellent brand trust",
+        "Reputed brand name",
+        "Brand is well respected",
+        "Reliable brand reputation",
+        "Brand known for quality"
+    ]
+};
+
+// phrase (lowercase) -> driver
+export const VERBATIM_TO_DRIVER = new Map<string, string>();
+Object.entries(POSITIVE_VERBATIMS_BY_DRIVER).forEach(([driver, list]) =>
+    list.forEach(p => VERBATIM_TO_DRIVER.set(p.trim().toLowerCase(), driver)));
+
+export function findDriverForVerbatim(phrase: string): string | null {
+    return VERBATIM_TO_DRIVER.get(String(phrase || '').trim().toLowerCase()) || null;
+}
+
+export function pickVerbatimForDriver(
+    driver: string,
+    usedInRow: Set<string>,
+    usedInCol?: Set<string>
+): string | null {
+    const pool = POSITIVE_VERBATIMS_BY_DRIVER[driver] || [];
+    if (pool.length === 0) return null;
+    const lower = (s: string) => s.trim().toLowerCase();
+    const fresh = pool.filter(p => !usedInRow.has(lower(p)) && !(usedInCol && usedInCol.has(lower(p))));
+    const notInRow = pool.filter(p => !usedInRow.has(lower(p)));
+    const choices = fresh.length ? fresh : notInRow;
+    return choices.length ? choices[Math.floor(Math.random() * choices.length)] : null;
+}
 // Generic positive adjectives / quantifiers that are too common to
 // discriminate between groups (a verbatim mentioning "good" or "strong"
 // should not light up every group that happens to use that word).

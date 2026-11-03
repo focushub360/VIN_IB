@@ -1,0 +1,63 @@
+﻿src/AdminDashboard.tsx(8,5): error TS6133: 'BarChart3' is declared but its value is never read.
+src/DataSources.tsx(8,5): error TS6133: 'Clock' is declared but its value is never read.
+src/DataSources.tsx(12,5): error TS6133: 'SlidersHorizontal' is declared but its value is never read.
+src/DataSources.tsx(14,5): error TS6133: 'ExternalLink' is declared but its value is never read.
+src/DataSources.tsx(16,5): error TS6133: 'Layers' is declared but its value is never read.
+src/DataSources.tsx(17,5): error TS6133: 'Globe' is declared but its value is never read.
+src/NpsAnalyzer.tsx(1,55): error TS6133: 'useCallback' is declared but its value is never read.
+src/NpsAnalyzer.tsx(21,5): error TS6133: 'BarChart3' is declared but its value is never read.
+src/NpsAnalyzer.tsx(32,5): error TS6133: 'ChevronDown' is declared but its value is never read.
+src/NpsAnalyzer.tsx(33,5): error TS6133: 'ChevronUp' is declared but its value is never read.
+src/NpsAnalyzer.tsx(44,5): error TS6133: 'FileText' is declared but its value is never read.
+src/NpsAnalyzer.tsx(45,5): error TS6133: 'Check' is declared but its value is never read.
+src/NpsAnalyzer.tsx(55,10): error TS6133: 'POSITIVE_DRIVER_L2_TO_L3' is declared but its value is never read.
+src/NpsAnalyzer.tsx(60,7): error TS6133: 'DESIRED_COLUMN_ORDER' is declared but its value is never read.
+src/NpsAnalyzer.tsx(635,12): error TS6133: 'isDragging' is declared but its value is never read.
+src/NpsAnalyzer.tsx(635,24): error TS6133: 'setIsDragging' is declared but its value is never read.
+src/NpsAnalyzer.tsx(636,25): error TS6133: 'setDossierMode' is declared but its value is never read.
+src/NpsAnalyzer.tsx(637,12): error TS6133: 'isUploadExpanded' is declared but its value is never read.
+src/NpsAnalyzer.tsx(698,11): error TS6133: 'fileInputRef' is declared but its value is never read.
+src/NpsAnalyzer.tsx(833,71): error TS2339: Property 'region' does not exist on type 'CountryItem'.
+src/NpsAnalyzer.tsx(965,42): error TS2339: Property 'id' does not exist on type '{ success: boolean; file: CommonUploadItem; }'.
+src/NpsAnalyzer.tsx(966,53): error TS2339: Property 'id' does not exist on type '{ success: boolean; file: CommonUploadItem; }'.
+src/NpsAnalyzer.tsx(967,76): error TS2339: Property 'id' does not exist on type '{ success: boolean; file: CommonUploadItem; }'.
+src/NpsAnalyzer.tsx(1161,11): error TS6133: 'processFiles' is declared but its value is never read.
+src/NpsAnalyzer.tsx(1341,11): error TS6133: 'handleLoadSample' is declared but its value is never read.
+src/NpsAnalyzer.tsx(1434,11): error TS6133: 'handleSimulate100Records' is declared but its value is never read.
+src/NpsAnalyzer.tsx(1443,15): error TS6133: 'models' is declared but its value is never read.
+src/NpsAnalyzer.tsx(1444,15): error TS6133: 'brands' is declared but its value is never read.
+src/NpsAnalyzer.tsx(1445,15): error TS6133: 'locations' is declared but its value is never read.
+src/NpsAnalyzer.tsx(1684,36): error TS6133: 'colName' is declared but its value is never read.
+src/NpsAnalyzer.tsx(1760,11): error TS6133: 'handleDownloadTemplate' is declared but its value is never read.
+src/QcDataCheck.tsx(4,5): error TS6133: 'UploadCloud' is declared but its value is never read.
+src/QcDataCheck.tsx(41,5): error TS2614: Module '"./shared/workshopDrivers"' has no exported member 'findWorkshopDriverForVerbatim'. Did you mean to use 'import findWorkshopDriverForVerbatim from "./shared/workshopDrivers"' instead?
+src/QcDataCheck.tsx(42,5): error TS2614: Module '"./shared/workshopDrivers"' has no exported member 'findWorkshopDriverForPhrase'. Did you mean to use 'import findWorkshopDriverForPhrase from "./shared/workshopDrivers"' instead?
+src/QcDataCheck.tsx(43,5): error TS2614: Module '"./shared/workshopDrivers"' has no exported member 'pickWorkshopVerbatimForDriver'. Did you mean to use 'import pickWorkshopVerbatimForDriver from "./shared/workshopDrivers"' instead?
+src/QcDataCheck.tsx(62,5): error TS6133: 'EXCELLENT_POOLS' is declared but its value is never read.
+src/QcDataCheck.tsx(63,5): error TS6133: 'MAYBE_POSITIVE_POOLS' is declared but its value is never read.
+src/QcDataCheck.tsx(104,10): error TS6133: 'pickPositiveForL2' is declared but its value is never read.
+src/QcDataCheck.tsx(289,10): error TS6133: 'readWorkshopRating' is declared but its value is never read.
+src/QcDataCheck.tsx(339,10): error TS6133: 'fillIfEmpty' is declared but its value is never read.
+src/QcDataCheck.tsx(363,10): error TS6133: 'pickDistinct' is declared but its value is never read.
+src/QcDataCheck.tsx(393,10): error TS6133: 'fillWorkshopVerbatims' is declared but its value is never read.
+src/QcDataCheck.tsx(404,21): error TS6133: 'l2' is declared but its value is never read.
+src/QcDataCheck.tsx(462,10): error TS6133: 'fillProductVerbatims' is declared but its value is never read.
+src/QcDataCheck.tsx(471,50): error TS6133: 'isPositive' is declared but its value is never read.
+src/QcDataCheck.tsx(621,10): error TS6133: 'pickDescriptive' is declared but its value is never read.
+src/QcDataCheck.tsx(846,15): error TS6133: 'col' is declared but its value is never read.
+src/QcDataCheck.tsx(881,15): error TS6133: 'col' is declared but its value is never read.
+src/QcDataCheck.tsx(916,15): error TS6133: 'col' is declared but its value is never read.
+src/QcDataCheck.tsx(951,5): error TS6133: 'l2SlotCols' is declared but its value is never read.
+src/QcDataCheck.tsx(958,15): error TS6133: 'col' is declared but its value is never read.
+src/QcDataCheck.tsx(994,15): error TS6133: 'col' is declared but its value is never read.
+src/QcDataCheck.tsx(1026,15): error TS6133: 'col' is declared but its value is never read.
+src/QcDataCheck.tsx(1057,15): error TS6133: 'col' is declared but its value is never read.
+src/QcDataCheck.tsx(2031,11): error TS6133: 'fileInputRef' is declared but its value is never read.
+src/QcDataCheck.tsx(2311,11): error TS6133: 'handleFileUpload' is declared but its value is never read.
+src/QcDataCheck.tsx(2729,26): error TS6133: 'row' is declared but its value is never read.
+src/QcDataCheck.tsx(2729,31): error TS6133: 'col' is declared but its value is never read.
+src/QcDataCheck.tsx(2746,26): error TS6133: 'row' is declared but its value is never read.
+src/QcDataCheck.tsx(2766,26): error TS6133: 'row' is declared but its value is never read.
+src/QcDataCheck.tsx(2766,31): error TS6133: 'col' is declared but its value is never read.
+src/QcDataCheck.tsx(2783,26): error TS6133: 'row' is declared but its value is never read.
+src/shared/QcDropdownTree.ts(27,7): error TS6133: 'spread' is declared but its value is never read.
