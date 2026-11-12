@@ -74,6 +74,15 @@ import {
     pickVerbatimForDriver
 } from './positiveDrivers';
 
+interface FillReport {
+    status: 'success' | 'partial' | 'failed';
+    mode: 'add' | 'decrease';
+    category: 'service' | 'product';
+    requested: number;
+    done: number;
+    reasons: string[];
+}
+
 /**
  * Maps an L2 complaint group name → the matching positive driver key used in
  * POSITIVE_DRIVER_L2_TO_L3. Returns null when there is no topic-relevant
@@ -2159,6 +2168,48 @@ const QcDataCheck: React.FC<QcDataCheckProps> = ({ onNavigateToDataSources }) =>
         serviceNegative: {}
     });
 
+    // ── Auto-fill result toast ──────────────────────────────────────────────
+    const [fillReport, setFillReport] = useState<FillReport | null>(null);
+    const [fillPaused, setFillPaused] = useState(false);
+    const [fillProgress, setFillProgress] = useState(1);
+    const fillPausedRef = useRef(false);
+    const fillRemainingRef = useRef(0);
+    const fillPrevReportRef = useRef<FillReport | null>(null);
+
+    // Pauseable auto-dismiss: success 5s, partial/failed 12s so the reasons can
+    // be read. Hover pauses the countdown; the × button / loadFileData clears it.
+    useEffect(() => {
+        if (!fillReport) return;
+
+        const total = fillReport.status === 'success' ? 5000 : 12000;
+        if (fillReport !== fillPrevReportRef.current) {
+            fillPrevReportRef.current = fillReport;
+            fillRemainingRef.current = total;
+            fillPausedRef.current = false;
+            setFillPaused(false);
+            setFillProgress(1);
+        }
+
+        let last = Date.now();
+        const interval = setInterval(() => {
+            const now = Date.now();
+            const delta = now - last;
+            last = now;
+            if (fillPausedRef.current) return; // frozen while hovered
+            fillRemainingRef.current = Math.max(0, fillRemainingRef.current - delta);
+            setFillProgress(Math.max(0, fillRemainingRef.current / total));
+        }, 100);
+
+        const timeout = setTimeout(() => {
+            setFillReport(null);
+        }, fillRemainingRef.current);
+
+        return () => {
+            clearInterval(interval);
+            clearTimeout(timeout);
+        };
+    }, [fillReport, fillPaused]);
+
     const handleOpenWeightModal = () => {
         const counts = computeExistingCounts(rows, columns);
         setExistingCounts(counts);
@@ -2396,6 +2447,7 @@ const QcDataCheck: React.FC<QcDataCheckProps> = ({ onNavigateToDataSources }) =>
             setFileName(data.file_name);
             setCurrentPage(1);
             setFlashTarget(null);
+            setFillReport(null);
 
             const visInit: Record<string, boolean> = {};
             loadedCols.forEach(c => { visInit[c] = true; });
@@ -2714,34 +2766,29 @@ const QcDataCheck: React.FC<QcDataCheckProps> = ({ onNavigateToDataSources }) =>
         });
     }, []);
 
+    // Remove the "_N" suffix that was added only for duplicate headers
+    const originalHeader = (name: string): string => {
+        const m = name.match(/^(.*)_(\d+)$/);
+        if (!m) return name;
+        const base = m[1];
+        // only strip if the base name also exists as a column (i.e. it was a generated suffix)
+        return columns.includes(base) ? base : name;
+    };
+
     const handleExportQcReport = () => {
         if (rows.length === 0 || filteredIndices.length === 0) return;
 
-        const exportCols = visibleColumns.length > 0 ? visibleColumns : columns;
+        const headerRow = columns.map(originalHeader);
 
-        const report = filteredIndices.map((globalIdx) => {
+        const dataRows = filteredIndices.map(globalIdx => {
             const row = rows[globalIdx] || {};
-            const qc = scanResults[globalIdx];
-
-            const exportRow: Record<string, any> = {
-                '#': globalIdx + 1,
-                'QC Status': qc?.ok ? 'PASS' : qc?.noL2 ? 'FAIL (No L2)' : 'FAIL',
-                'QC Issues': qc?.noL2
-                    ? 'No Complaint Group (L2) provided'
-                    : (qc?.issues || [])
-                        .map(is => `${is.l2ColumnName} = "${is.l2Value}" [expects ${is.followUpRangeLabel}]`)
-                        .join(' | ')
-            };
-
-            exportCols.forEach(col => {
-                const cellVal = row[col];
-                exportRow[col] = cellVal !== undefined && cellVal !== null ? cellVal : '';
+            return columns.map(col => {
+                const v = row[col];
+                return v !== undefined && v !== null ? v : '';
             });
-
-            return exportRow;
         });
 
-        const ws = XLSX.utils.json_to_sheet(report);
+        const ws = XLSX.utils.aoa_to_sheet([headerRow, ...dataRows]);
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, ws, 'QC Data');
         const cleanName = fileName ? fileName.replace(/\.[^/.]+$/, '') : 'Report';
@@ -2778,7 +2825,11 @@ const QcDataCheck: React.FC<QcDataCheckProps> = ({ onNavigateToDataSources }) =>
         const totalRows = rows.length;
         if (totalRows === 0) return;
 
+        // ── AUTO-FILL REPORTING: baseline before any changes ─────────────────
+        const before = computeExistingCounts(rows, columns);
+
         const mode = payload.mode; // 'add' | 'decrease'
+        const category = payload.category; // 'service' | 'product'
         const pick = <T,>(a: T[]) => a[Math.floor(Math.random() * a.length)];
 
         const isEmpty = (v: any) =>
@@ -2795,6 +2846,78 @@ const QcDataCheck: React.FC<QcDataCheckProps> = ({ onNavigateToDataSources }) =>
         for (let i = DF; i <= EM; i++) {
             const nm = idxToName[colIndexToLetter(i)];
             if (nm) l2SlotCols.push(nm);
+        }
+
+        // ── AUTO-FILL REPORTING: requested = sum of the payload weights ───────
+        let requested = 0;
+        if (category === 'service') {
+            for (const v of Object.values(payload.servicePositiveWeights || {})) requested += Math.max(0, Math.floor(Number(v) || 0));
+            for (const v of Object.values(payload.serviceNegativeWeights || {})) requested += Math.max(0, Math.floor(Number(v) || 0));
+        } else {
+            for (const v of Object.values(payload.l2Weights || {})) requested += Math.max(0, Math.floor(Number(v) || 0));
+            for (const v of Object.values(payload.positiveWeights || {})) requested += Math.max(0, Math.floor(Number(v) || 0));
+        }
+
+        const reasons: string[] = [];
+
+        // ── Auto-fill reporting: pre-flight diagnostics ──────────────────────
+        if (category === 'service') {
+            // Rows without a Workshop rating (A1/A2) are skipped by the filler
+            let emptyWorkshopRating = 0;
+            for (const r of rows) {
+                if (getWorkshopTier(r) === null) emptyWorkshopRating++;
+            }
+            if (emptyWorkshopRating > 0) {
+                reasons.push(`${emptyWorkshopRating} of ${totalRows} rows have an empty Workshop rating (BR/BS), so they were skipped.`);
+            }
+
+            // Requested service driver columns that aren't in the uploaded file
+            const missingServiceCols: string[] = [];
+            for (const [name, raw] of Object.entries(payload.servicePositiveWeights || {})) {
+                if (Math.floor(Number(raw) || 0) <= 0) continue;
+                const col = WORKSHOP_POSITIVE_L2_TO_COL[name];
+                if (col && !columns.includes(col)) missingServiceCols.push(col);
+            }
+            for (const [name, raw] of Object.entries(payload.serviceNegativeWeights || {})) {
+                if (Math.floor(Number(raw) || 0) <= 0) continue;
+                const col = WORKSHOP_NEGATIVE_L2_TO_COL[name];
+                if (col && !columns.includes(col)) missingServiceCols.push(col);
+            }
+            if (missingServiceCols.length > 0) {
+                reasons.push(`Requested service driver columns are not present in the file: ${Array.from(new Set(missingServiceCols)).join(', ')}.`);
+            }
+        } else {
+            // Rows without a Product rating default to Promoter and may be filled incorrectly
+            const prodRatingColMatch = (c: string) =>
+                c === 'X' ||
+                /^1\.\s*will you recommend your vehicle/i.test(c) ||
+                /^2\.\s*on a scale of 0 to 10/i.test(c) ||
+                /^2\.\s*likely to recommend vehicle/i.test(c);
+            let emptyProdRating = 0;
+            for (const r of rows) {
+                const hasRating = Object.keys(r).some(k => prodRatingColMatch(k) && !isEmpty(r[k]));
+                if (!hasRating) emptyProdRating++;
+            }
+            if (emptyProdRating > 0) {
+                reasons.push(`${emptyProdRating} of ${totalRows} rows have an empty Product rating, so they default to Promoter and may be filled incorrectly.`);
+            }
+
+            // Requested product driver columns that aren't in the uploaded file
+            const missingProdCols: string[] = [];
+            for (const [driverName, raw] of Object.entries(payload.positiveWeights || {})) {
+                if (Math.floor(Number(raw) || 0) <= 0) continue;
+                const col = POSITIVE_DRIVER_COLUMNS[driverName] || driverName;
+                if (!columns.includes(col)) missingProdCols.push(col);
+            }
+            if (missingProdCols.length > 0) {
+                reasons.push(`Requested product driver columns are not present in the file: ${Array.from(new Set(missingProdCols)).join(', ')}.`);
+            }
+
+            // Product L2 requested but the file has no L2 slot columns (DF..EM)
+            const l2Requested = Object.values(payload.l2Weights || {}).some(v => Math.floor(Number(v) || 0) > 0);
+            if (l2Requested && l2SlotCols.length === 0) {
+                reasons.push('No L2 could be placed: the uploaded file has no L2 complaint-group columns (DF..EM).');
+            }
         }
 
         const newRows: Record<string, any>[] = rows.map((r, i) => ({
@@ -3365,9 +3488,42 @@ const QcDataCheck: React.FC<QcDataCheckProps> = ({ onNavigateToDataSources }) =>
         }
 
         const newScans = newRows.map(r => scanRowQc(r, columns));
+
+        // ── AUTO-FILL REPORTING: diff the summed counts before/after ─────────
+        const after = computeExistingCounts(newRows, columns);
+        let beforeCount = 0;
+        let afterCount = 0;
+        if (category === 'service') {
+            for (const g of SERVICE_POSITIVE_GROUPS) { beforeCount += before.servicePositive[g] || 0; afterCount += after.servicePositive[g] || 0; }
+            for (const g of SERVICE_NEGATIVE_GROUPS) { beforeCount += before.serviceNegative[g] || 0; afterCount += after.serviceNegative[g] || 0; }
+        } else {
+            for (const g of L2_GROUPS) { beforeCount += before.l2[g] || 0; afterCount += after.l2[g] || 0; }
+            for (const d of POSITIVE_DRIVERS) { beforeCount += before.positive[d] || 0; afterCount += after.positive[d] || 0; }
+        }
+        const done = Math.abs(afterCount - beforeCount);
+
+        if (requested <= 0) {
+            reasons.push('No counts were requested, so nothing was done.');
+        }
+        if (done < requested) {
+            if (mode === 'add') {
+                reasons.push(`Only ${done} of ${requested} cells were filled. Rows may have hit the per-row maximum, been ineligible by rating tier, or already contained the value.`);
+            } else {
+                reasons.push(`Only ${done} of ${requested} cells were removed. In Decrease mode only auto-filled cells are removed, so original data is never touched.`);
+            }
+        }
+
+        let status: FillReport['status'] = 'success';
+        if (done === 0) {
+            status = 'failed';
+        } else if (done < requested || reasons.length > 0) {
+            status = 'partial';
+        }
+
         setRows(newRows);
         setScanResults(newScans);
-        setHasUnsavedChanges(true);
+        if (done > 0) setHasUnsavedChanges(true);
+        setFillReport({ status, mode, category, requested, done, reasons });
     };
 
     const tableCardRef = useRef<HTMLDivElement>(null);
@@ -3398,8 +3554,9 @@ const QcDataCheck: React.FC<QcDataCheckProps> = ({ onNavigateToDataSources }) =>
     ]);
 
     return (
-        <div style={shellStyle}>
-            <style>{`
+        <>
+            <div style={shellStyle}>
+                <style>{`
                 @keyframes qcFlash {
                     0%   { box-shadow: 0 0 0 0 rgba(250, 204, 21, 0.95); background-color: #fef08a; }
                     25%  { box-shadow: 0 0 0 4px rgba(250, 204, 21, 0.7); background-color: #fde047; }
@@ -3494,988 +3651,1116 @@ const QcDataCheck: React.FC<QcDataCheckProps> = ({ onNavigateToDataSources }) =>
                     cursor: not-allowed !important;
                     opacity: 0.65;
                 }
+                @keyframes qcToastIn {
+                    from { opacity: 0; transform: translateX(24px); }
+                    to { opacity: 1; transform: translateX(0); }
+                }
+                .qc-toast {
+                    position: fixed;
+                    top: 16px;
+                    right: 16px;
+                    z-index: 2000;
+                    width: 380px;
+                    max-width: calc(100vw - 32px);
+                    background: #ffffff;
+                    border-radius: 10px;
+                    box-shadow: 0 10px 30px rgba(15, 23, 42, 0.18), 0 0 0 1px rgba(15, 23, 42, 0.06);
+                    overflow: hidden;
+                    animation: qcToastIn 0.22s ease-out;
+                    font-family: inherit;
+                }
+                .qc-toast.qc-toast-paused { box-shadow: 0 14px 36px rgba(15, 23, 42, 0.24); }
+                .qc-toast-success { border-left: 4px solid #16a34a; }
+                .qc-toast-partial { border-left: 4px solid #f59e0b; }
+                .qc-toast-failed { border-left: 4px solid #dc2626; }
+                .qc-toast-body { display: flex; gap: 10px; align-items: flex-start; padding: 14px 12px 10px 14px; }
+                .qc-toast-icon { flex-shrink: 0; display: flex; margin-top: 1px; }
+                .qc-toast-success .qc-toast-icon { color: #16a34a; }
+                .qc-toast-partial .qc-toast-icon { color: #f59e0b; }
+                .qc-toast-failed .qc-toast-icon { color: #dc2626; }
+                .qc-toast-content { flex: 1; min-width: 0; }
+                .qc-toast-title { font-weight: 700; font-size: 14px; color: #0f172a; line-height: 1.3; }
+                .qc-toast-sub { font-size: 12.5px; color: #475569; margin-top: 3px; }
+                .qc-toast-reasons {
+                    margin: 8px 0 0 0;
+                    padding-left: 18px;
+                    max-height: 180px;
+                    overflow-y: auto;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 5px;
+                    font-size: 12px;
+                    color: #334155;
+                    line-height: 1.45;
+                }
+                .qc-toast-reasons::-webkit-scrollbar { width: 6px; }
+                .qc-toast-reasons::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+                .qc-toast-close {
+                    flex-shrink: 0;
+                    border: none;
+                    background: transparent;
+                    color: #64748b;
+                    font-size: 18px;
+                    line-height: 1;
+                    cursor: pointer;
+                    padding: 2px 4px;
+                    border-radius: 4px;
+                    transition: background 0.12s ease, color 0.12s ease;
+                }
+                .qc-toast-close:hover { background: #f1f5f9; color: #0f172a; }
+                .qc-toast-progress {
+                    height: 4px;
+                    background: #f1f5f9;
+                    margin-top: 10px;
+                }
+                .qc-toast-progress-bar {
+                    height: 100%;
+                    background: #94a3b8;
+                    transition: width 0.1s linear;
+                }
             `}</style>
 
-            {/* Common Repository Filter Bar - Replaces Direct Upload */}
-            {!isFullScreen && (
-                <div className="glass-panel" style={{ padding: '14px 20px', flexShrink: 0 }}>
-                    <div style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        flexWrap: 'wrap',
-                        gap: '12px',
-                        marginBottom: '12px'
-                    }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                            <div style={{
-                                width: '36px',
-                                height: '36px',
-                                borderRadius: '10px',
-                                background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                color: '#ffffff',
-                                boxShadow: '0 2px 8px rgba(37, 99, 235, 0.25)'
-                            }}>
-                                <Filter size={18} />
-                            </div>
-                            <div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                                    <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#0f172a' }}>
-                                        QC Data Check — File Selector
-                                    </h3>
-                                    {fileName && (
-                                        <span style={{
-                                            fontSize: '11.5px',
-                                            background: '#dcfce7',
-                                            color: '#15803d',
-                                            border: '1px solid #bbf7d0',
-                                            padding: '1px 8px',
-                                            borderRadius: '6px',
-                                            fontWeight: 600
-                                        }}>
-                                            Active File: {fileName}
-                                        </span>
-                                    )}
-                                </div>
-                                <p style={{ color: 'var(--color-text-muted)', fontSize: '12px', margin: '2px 0 0 0' }}>
-                                    Select from common uploaded repository files to run quality control validation.
-                                </p>
-                            </div>
-                        </div>
-
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                            {saveSuccessMsg && (
-                                <span style={{
-                                    fontSize: '11.5px',
-                                    color: '#16a34a',
-                                    background: '#f0fdf4',
-                                    border: '1px solid #bbf7d0',
-                                    padding: '3px 8px',
-                                    borderRadius: '6px',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '4px',
-                                    fontWeight: 600
-                                }}>
-                                    <CheckCircle2 size={12} /> {saveSuccessMsg}
-                                </span>
-                            )}
-
-                            <button
-                                type="button"
-                                className="modern-btn"
-                                onClick={handleSaveChanges}
-                                disabled={!hasUnsavedChanges || isSaving || !selectedFileId}
-                                style={{
-                                    padding: '6px 14px',
-                                    fontSize: '12px',
-                                    fontWeight: 700,
-                                    background: hasUnsavedChanges ? 'linear-gradient(135deg, #16a34a 0%, #059669 100%)' : '#f1f5f9',
-                                    color: hasUnsavedChanges ? '#ffffff' : '#94a3b8',
-                                    border: hasUnsavedChanges ? 'none' : '1px solid #e2e8f0',
-                                    cursor: hasUnsavedChanges && !isSaving ? 'pointer' : 'not-allowed',
-                                    boxShadow: hasUnsavedChanges ? '0 2px 8px rgba(22, 163, 74, 0.3)' : 'none',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '5px'
-                                }}
-                                title={hasUnsavedChanges ? `Save ${pendingEditsCount} unsaved cell edits to MongoDB database` : 'No unsaved edits'}
-                            >
-                                {isSaving ? (
-                                    <>
-                                        <RefreshCw size={12} className="animate-spin" />
-                                        Saving...
-                                    </>
-                                ) : (
-                                    <>
-                                        <Save size={13} />
-                                        Save Changes {hasUnsavedChanges && `(${pendingEditsCount})`}
-                                    </>
-                                )}
-                            </button>
-
-                            {onNavigateToDataSources && (
-                                <button
-                                    type="button"
-                                    className="modern-btn modern-btn-outline"
-                                    onClick={onNavigateToDataSources}
-                                    style={{ padding: '6px 12px', fontSize: '12px' }}
-                                    title="Go to Data Sources tab to upload or manage common files"
-                                >
-                                    <Database size={13} /> Manage Data Sources
-                                </button>
-                            )}
-                        </div>
-
-                    </div>
-                    {/* Dependent Dropdowns Filter Bar */}
-                    <div style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-                        gap: '12px',
-                        alignItems: 'flex-end'
-                    }}>
-                        {/* Region */}
-                        <div>
-                            <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>
-                                Region
-                            </label>
-                            <select
-                                value={filterRegion}
-                                onChange={e => {
-                                    setFilterRegion(e.target.value);
-                                    setFilterCountry('all');
-                                }}
-                                style={{
-                                    width: '100%',
-                                    padding: '7px 10px',
-                                    borderRadius: '6px',
-                                    border: '1px solid #cbd5e1',
-                                    background: '#ffffff',
-                                    fontSize: '12.5px',
-                                    color: '#0f172a',
-                                    outline: 'none'
-                                }}
-                            >
-                                <option value="all">All Regions</option>
-                                {regions.map(r => (
-                                    <option key={r.id} value={r.name}>{r.name}</option>
-                                ))}
-                            </select>
-                        </div>
-
-                        {/* Country (dependent on Region) */}
-                        <div>
-                            <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>
-                                Country
-                            </label>
-                            <select
-                                value={filterCountry}
-                                onChange={e => setFilterCountry(e.target.value)}
-                                style={{
-                                    width: '100%',
-                                    padding: '7px 10px',
-                                    borderRadius: '6px',
-                                    border: '1px solid #cbd5e1',
-                                    background: '#ffffff',
-                                    fontSize: '12.5px',
-                                    color: '#0f172a',
-                                    outline: 'none'
-                                }}
-                            >
-                                <option value="all">All Countries</option>
-                                {countries.map(c => (
-                                    <option key={c.id} value={c.name}>{c.name}</option>
-                                ))}
-                            </select>
-                        </div>
-
-                        {/* IB Version */}
-                        <div>
-                            <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>
-                                IB Version
-                            </label>
-                            <select
-                                value={filterIbVersion}
-                                onChange={e => setFilterIbVersion(e.target.value)}
-                                style={{
-                                    width: '100%',
-                                    padding: '7px 10px',
-                                    borderRadius: '6px',
-                                    border: '1px solid #cbd5e1',
-                                    background: '#ffffff',
-                                    fontSize: '12.5px',
-                                    color: '#0f172a',
-                                    outline: 'none'
-                                }}
-                            >
-                                <option value="all">All Versions</option>
-                                {ibVersions.map(v => (
-                                    <option key={v.id} value={v.name}>{v.name}</option>
-                                ))}
-                            </select>
-                        </div>
-
-                        {/* Brand & Model */}
-                        <div>
-                            <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>
-                                Brand &amp; Model
-                            </label>
-                            <select
-                                value={filterBrandModel}
-                                onChange={e => setFilterBrandModel(e.target.value)}
-                                style={{
-                                    width: '100%',
-                                    padding: '7px 10px',
-                                    borderRadius: '6px',
-                                    border: '1px solid #cbd5e1',
-                                    background: '#ffffff',
-                                    fontSize: '12.5px',
-                                    color: '#0f172a',
-                                    outline: 'none'
-                                }}
-                            >
-                                <option value="all">All Brands &amp; Models</option>
-                                {brandModels.map(bm => (
-                                    <option key={bm} value={bm}>{bm}</option>
-                                ))}
-                            </select>
-                        </div>
-
-                        {/* File Selection */}
-                        <div style={{ gridColumn: 'span 1' }}>
-                            <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>
-                                Select File ({filteredCommonFiles.length})
-                            </label>
-                            <select
-                                value={selectedFileId}
-                                onChange={e => setSelectedFileId(e.target.value)}
-                                style={{
-                                    width: '100%',
-                                    padding: '7px 10px',
-                                    borderRadius: '6px',
-                                    border: '1px solid #cbd5e1',
-                                    background: '#ffffff',
-                                    fontSize: '12.5px',
-                                    color: '#0f172a',
-                                    outline: 'none'
-                                }}
-                            >
-                                <option value="">-- Choose Uploaded File --</option>
-                                {filteredCommonFiles.map(f => (
-                                    <option key={f.id} value={f.id}>
-                                        {f.file_name} ({f.total_records} rows · {f.region_name} · {f.country_name})
-                                    </option>
-                                ))}
-                            </select>
-                        </div>
-
-                        {/* Load Button */}
-                        <div>
-                            <button
-                                type="button"
-                                className="modern-btn modern-btn-primary"
-                                onClick={() => loadFileData(selectedFileId)}
-                                disabled={!selectedFileId || isLoading}
-                                style={{ padding: '7px 16px', fontSize: '12.5px', width: '100%' }}
-                            >
-                                {isLoading ? (
-                                    <>
-                                        <RefreshCw size={13} className="animate-spin" />
-                                        Loading...
-                                    </>
-                                ) : (
-                                    <>
-                                        <FolderOpen size={14} />
-                                        Load File
-                                    </>
-                                )}
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            )}
-
-            {/* Empty State when no common files exist in repository */}
-            {!isLoading && commonFiles.length === 0 && !isLoadingFileList && (
-                <div className="glass-panel" style={{
-                    padding: '36px 24px',
-                    textAlign: 'center',
-                    borderRadius: '12px',
-                    background: '#ffffff',
-                    flexShrink: 0
-                }}>
-                    <Database size={36} color="#94a3b8" style={{ marginBottom: '10px' }} />
-                    <h3 style={{ margin: '0 0 6px 0', fontSize: '16px', fontWeight: 700, color: '#0f172a' }}>
-                        No common files uploaded yet
-                    </h3>
-                    <p style={{ margin: '0 0 16px 0', fontSize: '13px', color: '#64748b' }}>
-                        Go to the Data Sources tab to upload an Excel file.
-                    </p>
-                    {onNavigateToDataSources && (
-                        <button
-                            type="button"
-                            className="modern-btn modern-btn-primary"
-                            onClick={onNavigateToDataSources}
-                            style={{ padding: '8px 18px', fontSize: '13px' }}
-                        >
-                            <Database size={15} /> Go to Data Sources
-                        </button>
-                    )}
-                </div>
-            )}
-
-            {error && (
-                <div className="glass-panel" style={{
-                    padding: '12px 16px',
-                    background: 'rgba(254, 242, 242, 0.95)',
-                    borderColor: 'rgba(254, 202, 202, 0.95)',
-                    color: 'var(--color-danger)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '10px',
-                    flexShrink: 0
-                }}>
-                    <AlertTriangle size={18} color="#dc2626" />
-                    <div>
-                        <h4 style={{ margin: '0 0 2px 0', fontSize: '13px', fontWeight: 700 }}>
-                            Upload Error
-                        </h4>
-                        <p style={{ margin: 0, fontSize: '12px' }}>{error}</p>
-                    </div>
-                </div>
-            )}
-
-            {isLoading && (
-                <div className="glass-panel" style={{ padding: '36px', textAlign: 'center', flexShrink: 0 }}>
-                    <div style={{ fontSize: '28px', marginBottom: '8px' }}>⏳</div>
-                    <h3 style={{ margin: 0, fontSize: '15px', color: '#0f172a' }}>Parsing Excel & Scanning QC Rules…</h3>
-                </div>
-            )}
-
-            {!isLoading && rows.length === 0 && !error && (
-                <div className="feature-showcase-grid" style={{ flexShrink: 0 }}>
-                    <div className="feature-card">
-                        <div className="feature-card-icon" style={{ background: 'rgba(37,99,235,0.1)', color: '#2563eb' }}>
-                            <FileSpreadsheet size={18} />
-                        </div>
-                        <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>
-                            Full 449-Column Parsing
-                        </h4>
-                        <p style={{ margin: 0, fontSize: '12px', color: '#64748b', lineHeight: 1.45 }}>
-                            Reads your entire survey export — preserving all columns with high-performance instant caching.
-                        </p>
-                    </div>
-                    <div className="feature-card">
-                        <div className="feature-card-icon" style={{ background: 'rgba(245,158,11,0.1)', color: '#d97706' }}>
-                            <AlertTriangle size={18} />
-                        </div>
-                        <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>
-                            Bidirectional L2 Navigation
-                        </h4>
-                        <p style={{ margin: 0, fontSize: '12px', color: '#64748b', lineHeight: 1.45 }}>
-                            Click FAIL badge to jump to L2, jump to follow-up column, or click back to return.
-                        </p>
-                    </div>
-                    <div className="feature-card">
-                        <div className="feature-card-icon" style={{ background: 'rgba(16,185,129,0.1)', color: '#059669' }}>
-                            <CheckCircle2 size={18} />
-                        </div>
-                        <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>
-                            Compact Dropdowns & Export
-                        </h4>
-                        <p style={{ margin: 0, fontSize: '12px', color: '#64748b', lineHeight: 1.45 }}>
-                            Inline editable dropdowns centered with no extra whitespace, and one-click report export.
-                        </p>
-                    </div>
-                </div>
-            )}
-
-            {!isLoading && rows.length > 0 && (
-                <>
-                    {/* Summary Chips - Hidden in Full View */}
-                    {!isFullScreen && (
-                        <div className="glass-panel" style={{ padding: '8px 16px', flexShrink: 0 }}>
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
-                                <span className="modern-stat-chip total" style={{ fontSize: '11.5px', padding: '4px 10px' }}>
-                                    <FileSpreadsheet size={12} /> {rows.length} Total Rows
-                                </span>
-                                <span className="modern-stat-chip match" style={{ fontSize: '11.5px', padding: '4px 10px' }}>
-                                    <CheckCircle2 size={12} /> {summary.okRows} Pass
-                                </span>
-                                <span className="modern-stat-chip mismatch" style={{ fontSize: '11.5px', padding: '4px 10px' }}>
-                                    <AlertTriangle size={12} /> {summary.failRows} Fail
-                                </span>
-                                <span className="modern-stat-chip done" style={{ fontSize: '11.5px', padding: '4px 10px' }}>
-                                    <Layers size={12} /> {summary.totalIssues} Missing Follow-ups
-                                </span>
-
-                                <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                    <span style={{ fontSize: '11.5px', color: '#64748b', fontWeight: 500 }}>
-                                        📄 {fileName}
-                                    </span>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Table Card with fixed height and flex-contained scrolling */}
-                    <div
-                        ref={tableCardRef}
-                        className="glass-panel"
-                        style={{
-                            overflow: 'hidden',
-                            width: '100%',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            borderRadius: '12px',
-                            background: '#ffffff',
-                            boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)',
-                            height: isFullScreen ? '100%' : (cardHeight ?? 'calc(100vh - 420px)'),
-                            minHeight: '400px'
-                        }}
-                    >
-                        {/* Top Controls Toolbar */}
+                {/* Common Repository Filter Bar - Replaces Direct Upload */}
+                {!isFullScreen && (
+                    <div className="glass-panel" style={{ padding: '14px 20px', flexShrink: 0 }}>
                         <div style={{
-                            padding: '10px 18px',
-                            borderBottom: '1px solid rgba(226, 232, 240, 0.9)',
-                            background: '#f8fafc',
                             display: 'flex',
-                            justifyContent: 'space-between',
                             alignItems: 'center',
+                            justifyContent: 'space-between',
                             flexWrap: 'wrap',
-                            gap: '8px',
-                            flexShrink: 0
+                            gap: '12px',
+                            marginBottom: '12px'
                         }}>
-                            {/* Legend and Navigation Breadcrumbs */}
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-                                <span style={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '5px',
-                                    background: '#ffffff',
-                                    border: '1px solid #cbd5e1',
-                                    borderRadius: '5px',
-                                    padding: '3px 7px',
-                                    fontSize: '11px'
-                                }}>
-                                    <span style={{
-                                        width: '10px', height: '10px',
-                                        background: '#fed7aa',
-                                        border: '1.5px solid #c2410c',
-                                        borderRadius: '3px',
-                                        display: 'inline-block'
-                                    }} />
-                                    <span style={{ color: '#0f172a', fontWeight: 600 }}>L2 Selected</span>
-                                </span>
-                                <span style={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '5px',
-                                    background: '#ffffff',
-                                    border: '1px solid #cbd5e1',
-                                    borderRadius: '5px',
-                                    padding: '3px 7px',
-                                    fontSize: '11px'
-                                }}>
-                                    <span style={{
-                                        width: '10px', height: '10px',
-                                        background: '#fecaca',
-                                        border: '1.5px solid #b91c1c',
-                                        borderRadius: '3px',
-                                        display: 'inline-block'
-                                    }} />
-                                    <span style={{ color: '#0f172a', fontWeight: 600 }}>Follow-up Empty</span>
-                                </span>
-                                <span style={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '3px',
-                                    fontSize: '11px',
-                                    color: '#64748b',
-                                    fontStyle: 'italic',
-                                    marginLeft: '4px'
-                                }}>
-                                    <Crosshair size={11} />
-                                    <strong>FAIL</strong>
-                                    <ArrowRight size={9} />
-                                    <strong>L2</strong>
-                                    <ArrowRight size={9} />
-                                    <strong>Follow-up</strong>
-                                    &nbsp;·&nbsp;
-                                    <strong>Follow-up</strong>
-                                    <ArrowLeft size={9} />
-                                    <strong>L2</strong>
-                                </span>
-
-                                {/* Quick Filter Pills: All / Fail / Pass */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                                 <div style={{
-                                    display: 'inline-flex',
+                                    width: '36px',
+                                    height: '36px',
+                                    borderRadius: '10px',
+                                    background: 'linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%)',
+                                    display: 'flex',
                                     alignItems: 'center',
-                                    background: '#e2e8f0',
-                                    borderRadius: '6px',
-                                    padding: '2px',
-                                    marginLeft: '6px'
+                                    justifyContent: 'center',
+                                    color: '#ffffff',
+                                    boxShadow: '0 2px 8px rgba(37, 99, 235, 0.25)'
                                 }}>
-                                    <button
-                                        type="button"
-                                        onClick={() => { setStatusFilter('all'); setCurrentPage(1); }}
-                                        style={{
-                                            border: 'none',
-                                            background: statusFilter === 'all' ? '#ffffff' : 'transparent',
-                                            color: statusFilter === 'all' ? '#0f172a' : '#64748b',
-                                            fontWeight: statusFilter === 'all' ? 700 : 500,
-                                            borderRadius: '5px',
-                                            padding: '2px 7px',
-                                            fontSize: '11px',
-                                            cursor: 'pointer'
-                                        }}
-                                    >
-                                        All ({rows.length})
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => { setStatusFilter('fail'); setCurrentPage(1); }}
-                                        style={{
-                                            border: 'none',
-                                            background: statusFilter === 'fail' ? '#fef3c7' : 'transparent',
-                                            color: statusFilter === 'fail' ? '#b45309' : '#64748b',
-                                            fontWeight: statusFilter === 'fail' ? 700 : 500,
-                                            borderRadius: '5px',
-                                            padding: '2px 7px',
-                                            fontSize: '11px',
-                                            cursor: 'pointer'
-                                        }}
-                                    >
-                                        Fail Only ({summary.failRows})
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => { setStatusFilter('pass'); setCurrentPage(1); }}
-                                        style={{
-                                            border: 'none',
-                                            background: statusFilter === 'pass' ? '#dcfce7' : 'transparent',
-                                            color: statusFilter === 'pass' ? '#15803d' : '#64748b',
-                                            fontWeight: statusFilter === 'pass' ? 700 : 500,
-                                            borderRadius: '5px',
-                                            padding: '2px 7px',
-                                            fontSize: '11px',
-                                            cursor: 'pointer'
-                                        }}
-                                    >
-                                        Pass Only ({summary.okRows})
-                                    </button>
+                                    <Filter size={18} />
+                                </div>
+                                <div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                        <h3 style={{ margin: 0, fontSize: '15px', fontWeight: 700, color: '#0f172a' }}>
+                                            QC Data Check — File Selector
+                                        </h3>
+                                        {fileName && (
+                                            <span style={{
+                                                fontSize: '11.5px',
+                                                background: '#dcfce7',
+                                                color: '#15803d',
+                                                border: '1px solid #bbf7d0',
+                                                padding: '1px 8px',
+                                                borderRadius: '6px',
+                                                fontWeight: 600
+                                            }}>
+                                                Active File: {fileName}
+                                            </span>
+                                        )}
+                                    </div>
+                                    <p style={{ color: 'var(--color-text-muted)', fontSize: '12px', margin: '2px 0 0 0' }}>
+                                        Select from common uploaded repository files to run quality control validation.
+                                    </p>
                                 </div>
                             </div>
 
-                            {/* Right Actions: Search, Focus QC Cols, Select Columns, Full View, Export */}
-                            <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
-                                {/* Search */}
-                                <div style={{ position: 'relative' }}>
-                                    <Search size={13} style={{
-                                        position: 'absolute', left: '8px',
-                                        top: '50%', transform: 'translateY(-50%)',
-                                        color: '#94a3b8'
-                                    }} />
-                                    <input
-                                        type="text"
-                                        placeholder="Search rows…"
-                                        value={searchText}
-                                        onChange={e => { setSearchText(e.target.value); setCurrentPage(1); }}
-                                        style={{
-                                            padding: '5px 8px 5px 26px',
-                                            border: '1px solid #cbd5e1',
-                                            borderRadius: '5px',
-                                            fontSize: '11.5px',
-                                            width: '160px',
-                                            outline: 'none',
-                                            background: '#ffffff',
-                                            color: 'black'
-                                        }}
-                                    />
-                                </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                {saveSuccessMsg && (
+                                    <span style={{
+                                        fontSize: '11.5px',
+                                        color: '#16a34a',
+                                        background: '#f0fdf4',
+                                        border: '1px solid #bbf7d0',
+                                        padding: '3px 8px',
+                                        borderRadius: '6px',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '4px',
+                                        fontWeight: 600
+                                    }}>
+                                        <CheckCircle2 size={12} /> {saveSuccessMsg}
+                                    </span>
+                                )}
 
-                                {/* Focus QC Columns Only Button */}
                                 <button
                                     type="button"
-                                    onClick={() => setFocusQcColsOnly(v => !v)}
-                                    className={focusQcColsOnly ? 'modern-btn modern-btn-primary' : 'modern-btn modern-btn-outline'}
-                                    style={{ padding: '5px 8px', fontSize: '11px' }}
-                                    title="Show only L2 Complaint groups and follow-up columns for faster review"
-                                >
-                                    <Filter size={12} />
-                                    {focusQcColsOnly ? 'QC View Active' : 'Focus QC Cols'}
-                                </button>
-
-                                {/* Full View Button */}
-                                <button
-                                    className={isFullScreen ? 'modern-btn modern-btn-primary' : 'modern-btn modern-btn-outline'}
-                                    onClick={() => setIsFullScreen(v => !v)}
-                                    style={{ padding: '5px 8px', fontSize: '11px' }}
-                                    title={isFullScreen ? 'Exit Full View (Esc)' : 'Expand to Full View'}
-                                >
-                                    {isFullScreen ? (
-                                        <><Minimize2 size={12} /> Exit Full View</>
-                                    ) : (
-                                        <><Maximize2 size={12} /> Full View</>
-                                    )}
-                                </button>
-
-                                {/* Save Changes in Table Bar */}
-                                <button
-                                    type="button"
+                                    className="modern-btn"
                                     onClick={handleSaveChanges}
                                     disabled={!hasUnsavedChanges || isSaving || !selectedFileId}
-                                    className={hasUnsavedChanges ? 'modern-btn modern-btn-primary' : 'modern-btn modern-btn-outline'}
                                     style={{
-                                        padding: '5px 10px',
-                                        fontSize: '11px',
+                                        padding: '6px 14px',
+                                        fontSize: '12px',
                                         fontWeight: 700,
-                                        background: hasUnsavedChanges ? '#16a34a' : undefined,
-                                        borderColor: hasUnsavedChanges ? '#15803d' : undefined,
+                                        background: hasUnsavedChanges ? 'linear-gradient(135deg, #16a34a 0%, #059669 100%)' : '#f1f5f9',
                                         color: hasUnsavedChanges ? '#ffffff' : '#94a3b8',
-                                        cursor: hasUnsavedChanges && !isSaving ? 'pointer' : 'not-allowed'
+                                        border: hasUnsavedChanges ? 'none' : '1px solid #e2e8f0',
+                                        cursor: hasUnsavedChanges && !isSaving ? 'pointer' : 'not-allowed',
+                                        boxShadow: hasUnsavedChanges ? '0 2px 8px rgba(22, 163, 74, 0.3)' : 'none',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '5px'
                                     }}
                                     title={hasUnsavedChanges ? `Save ${pendingEditsCount} unsaved cell edits to MongoDB database` : 'No unsaved edits'}
                                 >
                                     {isSaving ? (
-                                        <><RefreshCw size={11} className="animate-spin" /> Saving...</>
+                                        <>
+                                            <RefreshCw size={12} className="animate-spin" />
+                                            Saving...
+                                        </>
                                     ) : (
-                                        <><Save size={11} /> Save Changes {hasUnsavedChanges && `(${pendingEditsCount})`}</>
+                                        <>
+                                            <Save size={13} />
+                                            Save Changes {hasUnsavedChanges && `(${pendingEditsCount})`}
+                                        </>
                                     )}
                                 </button>
-                                <button
-                                    className="modern-btn modern-btn-secondary"
-                                    onClick={handleOpenWeightModal}
-                                    title="Auto-fill via count weights (Add / Decrease)"
-                                >
-                                    <Sparkles size={14} /> Auto-Fill Weights
-                                </button>
 
-                                {/* Select Columns Dropdown */}
-                                <div style={{ position: 'relative' }}>
+                                {onNavigateToDataSources && (
                                     <button
-                                        className="modern-btn modern-btn-secondary"
-                                        onClick={() => setShowColumnFilter(v => !v)}
-                                        style={{ padding: '5px 8px', fontSize: '11px' }}
+                                        type="button"
+                                        className="modern-btn modern-btn-outline"
+                                        onClick={onNavigateToDataSources}
+                                        style={{ padding: '6px 12px', fontSize: '12px' }}
+                                        title="Go to Data Sources tab to upload or manage common files"
                                     >
-                                        <SlidersHorizontal size={12} />
-                                        Columns ({visibleColumns.length})
+                                        <Database size={13} /> Manage Data Sources
                                     </button>
-                                    {showColumnFilter && (
-                                        <div style={{
-                                            position: 'absolute',
-                                            top: 'calc(100% + 6px)',
-                                            right: 0,
-                                            background: '#fff',
-                                            border: '1px solid #e2e8f0',
-                                            borderRadius: '8px',
-                                            boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
-                                            padding: '12px',
-                                            width: '300px',
-                                            zIndex: 60,
-                                            maxHeight: '360px',
-                                            display: 'flex',
-                                            flexDirection: 'column',
-                                            gap: '8px'
-                                        }}>
-                                            <div style={{ display: 'flex', gap: '6px' }}>
-                                                <button
-                                                    className="modern-btn modern-btn-secondary"
-                                                    onClick={() => {
-                                                        const v: Record<string, boolean> = {};
-                                                        columns.forEach(c => { v[c] = true; });
-                                                        setVisibleCols(v);
-                                                    }}
-                                                    style={{ padding: '3px 8px', fontSize: '11px', flex: 1 }}
-                                                >
-                                                    Show All
-                                                </button>
-                                                <button
-                                                    className="modern-btn modern-btn-outline"
-                                                    onClick={() => {
-                                                        const v: Record<string, boolean> = {};
-                                                        columns.forEach(c => { v[c] = false; });
-                                                        setVisibleCols(v);
-                                                    }}
-                                                    style={{ padding: '3px 8px', fontSize: '11px', flex: 1 }}
-                                                >
-                                                    Hide All
-                                                </button>
-                                            </div>
+                                )}
+                            </div>
 
-                                            <input
-                                                type="text"
-                                                placeholder="Filter column names…"
-                                                value={columnSearchQuery}
-                                                onChange={e => setColumnSearchQuery(e.target.value)}
-                                                style={{
-                                                    padding: '5px 8px',
-                                                    border: '1px solid #cbd5e1',
-                                                    borderRadius: '5px',
-                                                    fontSize: '11.5px',
-                                                    outline: 'none'
-                                                }}
-                                            />
-
-                                            <div style={{ overflowY: 'auto', maxHeight: '240px' }}>
-                                                {columns
-                                                    .filter(c => !columnSearchQuery || c.toLowerCase().includes(columnSearchQuery.toLowerCase()))
-                                                    .map(col => (
-                                                        <div key={col} style={{
-                                                            display: 'flex',
-                                                            alignItems: 'flex-start',
-                                                            gap: '8px',
-                                                            marginBottom: '5px'
-                                                        }}>
-                                                            <input
-                                                                type="checkbox"
-                                                                checked={visibleCols[col] !== false}
-                                                                onChange={() => setVisibleCols(p => ({
-                                                                    ...p,
-                                                                    [col]: !p[col]
-                                                                }))}
-                                                                style={{ marginTop: '2px', cursor: 'pointer' }}
-                                                            />
-                                                            <label style={{
-                                                                fontSize: '11.5px',
-                                                                cursor: 'pointer',
-                                                                lineHeight: 1.3,
-                                                                color: '#334155'
-                                                            }}>
-                                                                {col}
-                                                            </label>
-                                                        </div>
-                                                    ))}
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
-
-                                {/* Export QC Report Button */}
-                                <button
-                                    className="modern-btn modern-btn-success"
-                                    onClick={handleExportQcReport}
-                                    style={{ padding: '5px 10px', fontSize: '11px' }}
+                        </div>
+                        {/* Dependent Dropdowns Filter Bar */}
+                        <div style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                            gap: '12px',
+                            alignItems: 'flex-end'
+                        }}>
+                            {/* Region */}
+                            <div>
+                                <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>
+                                    Region
+                                </label>
+                                <select
+                                    value={filterRegion}
+                                    onChange={e => {
+                                        setFilterRegion(e.target.value);
+                                        setFilterCountry('all');
+                                    }}
+                                    style={{
+                                        width: '100%',
+                                        padding: '7px 10px',
+                                        borderRadius: '6px',
+                                        border: '1px solid #cbd5e1',
+                                        background: '#ffffff',
+                                        fontSize: '12.5px',
+                                        color: '#0f172a',
+                                        outline: 'none'
+                                    }}
                                 >
-                                    <Download size={12} /> Export
+                                    <option value="all">All Regions</option>
+                                    {regions.map(r => (
+                                        <option key={r.id} value={r.name}>{r.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {/* Country (dependent on Region) */}
+                            <div>
+                                <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>
+                                    Country
+                                </label>
+                                <select
+                                    value={filterCountry}
+                                    onChange={e => setFilterCountry(e.target.value)}
+                                    style={{
+                                        width: '100%',
+                                        padding: '7px 10px',
+                                        borderRadius: '6px',
+                                        border: '1px solid #cbd5e1',
+                                        background: '#ffffff',
+                                        fontSize: '12.5px',
+                                        color: '#0f172a',
+                                        outline: 'none'
+                                    }}
+                                >
+                                    <option value="all">All Countries</option>
+                                    {countries.map(c => (
+                                        <option key={c.id} value={c.name}>{c.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {/* IB Version */}
+                            <div>
+                                <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>
+                                    IB Version
+                                </label>
+                                <select
+                                    value={filterIbVersion}
+                                    onChange={e => setFilterIbVersion(e.target.value)}
+                                    style={{
+                                        width: '100%',
+                                        padding: '7px 10px',
+                                        borderRadius: '6px',
+                                        border: '1px solid #cbd5e1',
+                                        background: '#ffffff',
+                                        fontSize: '12.5px',
+                                        color: '#0f172a',
+                                        outline: 'none'
+                                    }}
+                                >
+                                    <option value="all">All Versions</option>
+                                    {ibVersions.map(v => (
+                                        <option key={v.id} value={v.name}>{v.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {/* Brand & Model */}
+                            <div>
+                                <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>
+                                    Brand &amp; Model
+                                </label>
+                                <select
+                                    value={filterBrandModel}
+                                    onChange={e => setFilterBrandModel(e.target.value)}
+                                    style={{
+                                        width: '100%',
+                                        padding: '7px 10px',
+                                        borderRadius: '6px',
+                                        border: '1px solid #cbd5e1',
+                                        background: '#ffffff',
+                                        fontSize: '12.5px',
+                                        color: '#0f172a',
+                                        outline: 'none'
+                                    }}
+                                >
+                                    <option value="all">All Brands &amp; Models</option>
+                                    {brandModels.map(bm => (
+                                        <option key={bm} value={bm}>{bm}</option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {/* File Selection */}
+                            <div style={{ gridColumn: 'span 1' }}>
+                                <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>
+                                    Select File ({filteredCommonFiles.length})
+                                </label>
+                                <select
+                                    value={selectedFileId}
+                                    onChange={e => setSelectedFileId(e.target.value)}
+                                    style={{
+                                        width: '100%',
+                                        padding: '7px 10px',
+                                        borderRadius: '6px',
+                                        border: '1px solid #cbd5e1',
+                                        background: '#ffffff',
+                                        fontSize: '12.5px',
+                                        color: '#0f172a',
+                                        outline: 'none'
+                                    }}
+                                >
+                                    <option value="">-- Choose Uploaded File --</option>
+                                    {filteredCommonFiles.map(f => (
+                                        <option key={f.id} value={f.id}>
+                                            {f.file_name} ({f.total_records} rows · {f.region_name} · {f.country_name})
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            {/* Load Button */}
+                            <div>
+                                <button
+                                    type="button"
+                                    className="modern-btn modern-btn-primary"
+                                    onClick={() => loadFileData(selectedFileId)}
+                                    disabled={!selectedFileId || isLoading}
+                                    style={{ padding: '7px 16px', fontSize: '12.5px', width: '100%' }}
+                                >
+                                    {isLoading ? (
+                                        <>
+                                            <RefreshCw size={13} className="animate-spin" />
+                                            Loading...
+                                        </>
+                                    ) : (
+                                        <>
+                                            <FolderOpen size={14} />
+                                            Load File
+                                        </>
+                                    )}
                                 </button>
                             </div>
                         </div>
+                    </div>
+                )}
 
-                        {/* Scrollable Table Viewport - flex: 1 with minHeight: 0 and height: 0 prevents table from pushing pagination off-screen */}
+                {/* Empty State when no common files exist in repository */}
+                {!isLoading && commonFiles.length === 0 && !isLoadingFileList && (
+                    <div className="glass-panel" style={{
+                        padding: '36px 24px',
+                        textAlign: 'center',
+                        borderRadius: '12px',
+                        background: '#ffffff',
+                        flexShrink: 0
+                    }}>
+                        <Database size={36} color="#94a3b8" style={{ marginBottom: '10px' }} />
+                        <h3 style={{ margin: '0 0 6px 0', fontSize: '16px', fontWeight: 700, color: '#0f172a' }}>
+                            No common files uploaded yet
+                        </h3>
+                        <p style={{ margin: '0 0 16px 0', fontSize: '13px', color: '#64748b' }}>
+                            Go to the Data Sources tab to upload an Excel file.
+                        </p>
+                        {onNavigateToDataSources && (
+                            <button
+                                type="button"
+                                className="modern-btn modern-btn-primary"
+                                onClick={onNavigateToDataSources}
+                                style={{ padding: '8px 18px', fontSize: '13px' }}
+                            >
+                                <Database size={15} /> Go to Data Sources
+                            </button>
+                        )}
+                    </div>
+                )}
+
+                {error && (
+                    <div className="glass-panel" style={{
+                        padding: '12px 16px',
+                        background: 'rgba(254, 242, 242, 0.95)',
+                        borderColor: 'rgba(254, 202, 202, 0.95)',
+                        color: 'var(--color-danger)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px',
+                        flexShrink: 0
+                    }}>
+                        <AlertTriangle size={18} color="#dc2626" />
+                        <div>
+                            <h4 style={{ margin: '0 0 2px 0', fontSize: '13px', fontWeight: 700 }}>
+                                Upload Error
+                            </h4>
+                            <p style={{ margin: 0, fontSize: '12px' }}>{error}</p>
+                        </div>
+                    </div>
+                )}
+
+                {isLoading && (
+                    <div className="glass-panel" style={{ padding: '36px', textAlign: 'center', flexShrink: 0 }}>
+                        <div style={{ fontSize: '28px', marginBottom: '8px' }}>⏳</div>
+                        <h3 style={{ margin: 0, fontSize: '15px', color: '#0f172a' }}>Parsing Excel & Scanning QC Rules…</h3>
+                    </div>
+                )}
+
+                {!isLoading && rows.length === 0 && !error && (
+                    <div className="feature-showcase-grid" style={{ flexShrink: 0 }}>
+                        <div className="feature-card">
+                            <div className="feature-card-icon" style={{ background: 'rgba(37,99,235,0.1)', color: '#2563eb' }}>
+                                <FileSpreadsheet size={18} />
+                            </div>
+                            <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>
+                                Full 449-Column Parsing
+                            </h4>
+                            <p style={{ margin: 0, fontSize: '12px', color: '#64748b', lineHeight: 1.45 }}>
+                                Reads your entire survey export — preserving all columns with high-performance instant caching.
+                            </p>
+                        </div>
+                        <div className="feature-card">
+                            <div className="feature-card-icon" style={{ background: 'rgba(245,158,11,0.1)', color: '#d97706' }}>
+                                <AlertTriangle size={18} />
+                            </div>
+                            <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>
+                                Bidirectional L2 Navigation
+                            </h4>
+                            <p style={{ margin: 0, fontSize: '12px', color: '#64748b', lineHeight: 1.45 }}>
+                                Click FAIL badge to jump to L2, jump to follow-up column, or click back to return.
+                            </p>
+                        </div>
+                        <div className="feature-card">
+                            <div className="feature-card-icon" style={{ background: 'rgba(16,185,129,0.1)', color: '#059669' }}>
+                                <CheckCircle2 size={18} />
+                            </div>
+                            <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 700, color: '#0f172a' }}>
+                                Compact Dropdowns & Export
+                            </h4>
+                            <p style={{ margin: 0, fontSize: '12px', color: '#64748b', lineHeight: 1.45 }}>
+                                Inline editable dropdowns centered with no extra whitespace, and one-click report export.
+                            </p>
+                        </div>
+                    </div>
+                )}
+
+                {!isLoading && rows.length > 0 && (
+                    <>
+                        {/* Summary Chips - Hidden in Full View */}
+                        {!isFullScreen && (
+                            <div className="glass-panel" style={{ padding: '8px 16px', flexShrink: 0 }}>
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+                                    <span className="modern-stat-chip total" style={{ fontSize: '11.5px', padding: '4px 10px' }}>
+                                        <FileSpreadsheet size={12} /> {rows.length} Total Rows
+                                    </span>
+                                    <span className="modern-stat-chip match" style={{ fontSize: '11.5px', padding: '4px 10px' }}>
+                                        <CheckCircle2 size={12} /> {summary.okRows} Pass
+                                    </span>
+                                    <span className="modern-stat-chip mismatch" style={{ fontSize: '11.5px', padding: '4px 10px' }}>
+                                        <AlertTriangle size={12} /> {summary.failRows} Fail
+                                    </span>
+                                    <span className="modern-stat-chip done" style={{ fontSize: '11.5px', padding: '4px 10px' }}>
+                                        <Layers size={12} /> {summary.totalIssues} Missing Follow-ups
+                                    </span>
+
+                                    <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                        <span style={{ fontSize: '11.5px', color: '#64748b', fontWeight: 500 }}>
+                                            📄 {fileName}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Table Card with fixed height and flex-contained scrolling */}
                         <div
-                            ref={tableScrollRef}
+                            ref={tableCardRef}
+                            className="glass-panel"
                             style={{
-                                flex: '1 1 0%',
-                                minHeight: 0,
-                                height: 0,
+                                overflow: 'hidden',
                                 width: '100%',
-                                overflowX: 'auto',
-                                overflowY: 'auto',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                borderRadius: '12px',
                                 background: '#ffffff',
-                                WebkitOverflowScrolling: 'touch',
-                                willChange: 'transform'
+                                boxShadow: '0 1px 3px 0 rgba(0, 0, 0, 0.1)',
+                                height: isFullScreen ? '100%' : (cardHeight ?? 'calc(100vh - 420px)'),
+                                minHeight: '400px'
                             }}
                         >
-                            <table className="modern-table" style={{
-                                width: 'max-content',
-                                minWidth: '100%',
-                                borderCollapse: 'collapse',
-                                fontSize: '12px',
-                                tableLayout: 'fixed'
+                            {/* Top Controls Toolbar */}
+                            <div style={{
+                                padding: '10px 18px',
+                                borderBottom: '1px solid rgba(226, 232, 240, 0.9)',
+                                background: '#f8fafc',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                flexWrap: 'wrap',
+                                gap: '8px',
+                                flexShrink: 0
                             }}>
-                                <thead>
-                                    <tr>
-                                        {/* Sticky Row Number Header */}
-                                        <th style={{
-                                            position: 'sticky',
-                                            top: 0,
-                                            left: 0,
-                                            zIndex: 25,
-                                            background: '#1e293b',
-                                            color: '#fff',
-                                            padding: '8px 10px',
-                                            width: '50px',
-                                            minWidth: '50px',
-                                            borderRight: '2px solid #475569'
-                                        }}>
-                                            #
-                                        </th>
+                                {/* Legend and Navigation Breadcrumbs */}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                                    <span style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '5px',
+                                        background: '#ffffff',
+                                        border: '1px solid #cbd5e1',
+                                        borderRadius: '5px',
+                                        padding: '3px 7px',
+                                        fontSize: '11px'
+                                    }}>
+                                        <span style={{
+                                            width: '10px', height: '10px',
+                                            background: '#fed7aa',
+                                            border: '1.5px solid #c2410c',
+                                            borderRadius: '3px',
+                                            display: 'inline-block'
+                                        }} />
+                                        <span style={{ color: '#0f172a', fontWeight: 600 }}>L2 Selected</span>
+                                    </span>
+                                    <span style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '5px',
+                                        background: '#ffffff',
+                                        border: '1px solid #cbd5e1',
+                                        borderRadius: '5px',
+                                        padding: '3px 7px',
+                                        fontSize: '11px'
+                                    }}>
+                                        <span style={{
+                                            width: '10px', height: '10px',
+                                            background: '#fecaca',
+                                            border: '1.5px solid #b91c1c',
+                                            borderRadius: '3px',
+                                            display: 'inline-block'
+                                        }} />
+                                        <span style={{ color: '#0f172a', fontWeight: 600 }}>Follow-up Empty</span>
+                                    </span>
+                                    <span style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '3px',
+                                        fontSize: '11px',
+                                        color: '#64748b',
+                                        fontStyle: 'italic',
+                                        marginLeft: '4px'
+                                    }}>
+                                        <Crosshair size={11} />
+                                        <strong>FAIL</strong>
+                                        <ArrowRight size={9} />
+                                        <strong>L2</strong>
+                                        <ArrowRight size={9} />
+                                        <strong>Follow-up</strong>
+                                        &nbsp;·&nbsp;
+                                        <strong>Follow-up</strong>
+                                        <ArrowLeft size={9} />
+                                        <strong>L2</strong>
+                                    </span>
 
-                                        {/* Sticky QC Status Header */}
-                                        <th style={{
-                                            position: 'sticky',
-                                            top: 0,
-                                            zIndex: 20,
-                                            background: '#1e293b',
-                                            color: '#fff',
-                                            padding: '8px 10px',
-                                            width: '110px',
-                                            minWidth: '110px'
-                                        }}>
-                                            QC Status
-                                        </th>
+                                    {/* Quick Filter Pills: All / Fail / Pass */}
+                                    <div style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        background: '#e2e8f0',
+                                        borderRadius: '6px',
+                                        padding: '2px',
+                                        marginLeft: '6px'
+                                    }}>
+                                        <button
+                                            type="button"
+                                            onClick={() => { setStatusFilter('all'); setCurrentPage(1); }}
+                                            style={{
+                                                border: 'none',
+                                                background: statusFilter === 'all' ? '#ffffff' : 'transparent',
+                                                color: statusFilter === 'all' ? '#0f172a' : '#64748b',
+                                                fontWeight: statusFilter === 'all' ? 700 : 500,
+                                                borderRadius: '5px',
+                                                padding: '2px 7px',
+                                                fontSize: '11px',
+                                                cursor: 'pointer'
+                                            }}
+                                        >
+                                            All ({rows.length})
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => { setStatusFilter('fail'); setCurrentPage(1); }}
+                                            style={{
+                                                border: 'none',
+                                                background: statusFilter === 'fail' ? '#fef3c7' : 'transparent',
+                                                color: statusFilter === 'fail' ? '#b45309' : '#64748b',
+                                                fontWeight: statusFilter === 'fail' ? 700 : 500,
+                                                borderRadius: '5px',
+                                                padding: '2px 7px',
+                                                fontSize: '11px',
+                                                cursor: 'pointer'
+                                            }}
+                                        >
+                                            Fail Only ({summary.failRows})
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => { setStatusFilter('pass'); setCurrentPage(1); }}
+                                            style={{
+                                                border: 'none',
+                                                background: statusFilter === 'pass' ? '#dcfce7' : 'transparent',
+                                                color: statusFilter === 'pass' ? '#15803d' : '#64748b',
+                                                fontWeight: statusFilter === 'pass' ? 700 : 500,
+                                                borderRadius: '5px',
+                                                padding: '2px 7px',
+                                                fontSize: '11px',
+                                                cursor: 'pointer'
+                                            }}
+                                        >
+                                            Pass Only ({summary.okRows})
+                                        </button>
+                                    </div>
+                                </div>
 
-                                        {/* Dynamic Data Headers */}
-                                        {visibleColumns.map((col, idx) => (
-                                            <th key={idx} style={{
+                                {/* Right Actions: Search, Focus QC Cols, Select Columns, Full View, Export */}
+                                <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+                                    {/* Search */}
+                                    <div style={{ position: 'relative' }}>
+                                        <Search size={13} style={{
+                                            position: 'absolute', left: '8px',
+                                            top: '50%', transform: 'translateY(-50%)',
+                                            color: '#94a3b8'
+                                        }} />
+                                        <input
+                                            type="text"
+                                            placeholder="Search rows…"
+                                            value={searchText}
+                                            onChange={e => { setSearchText(e.target.value); setCurrentPage(1); }}
+                                            style={{
+                                                padding: '5px 8px 5px 26px',
+                                                border: '1px solid #cbd5e1',
+                                                borderRadius: '5px',
+                                                fontSize: '11.5px',
+                                                width: '160px',
+                                                outline: 'none',
+                                                background: '#ffffff',
+                                                color: 'black'
+                                            }}
+                                        />
+                                    </div>
+
+                                    {/* Focus QC Columns Only Button */}
+                                    <button
+                                        type="button"
+                                        onClick={() => setFocusQcColsOnly(v => !v)}
+                                        className={focusQcColsOnly ? 'modern-btn modern-btn-primary' : 'modern-btn modern-btn-outline'}
+                                        style={{ padding: '5px 8px', fontSize: '11px' }}
+                                        title="Show only L2 Complaint groups and follow-up columns for faster review"
+                                    >
+                                        <Filter size={12} />
+                                        {focusQcColsOnly ? 'QC View Active' : 'Focus QC Cols'}
+                                    </button>
+
+                                    {/* Full View Button */}
+                                    <button
+                                        className={isFullScreen ? 'modern-btn modern-btn-primary' : 'modern-btn modern-btn-outline'}
+                                        onClick={() => setIsFullScreen(v => !v)}
+                                        style={{ padding: '5px 8px', fontSize: '11px' }}
+                                        title={isFullScreen ? 'Exit Full View (Esc)' : 'Expand to Full View'}
+                                    >
+                                        {isFullScreen ? (
+                                            <><Minimize2 size={12} /> Exit Full View</>
+                                        ) : (
+                                            <><Maximize2 size={12} /> Full View</>
+                                        )}
+                                    </button>
+
+                                    {/* Save Changes in Table Bar */}
+                                    <button
+                                        type="button"
+                                        onClick={handleSaveChanges}
+                                        disabled={!hasUnsavedChanges || isSaving || !selectedFileId}
+                                        className={hasUnsavedChanges ? 'modern-btn modern-btn-primary' : 'modern-btn modern-btn-outline'}
+                                        style={{
+                                            padding: '5px 10px',
+                                            fontSize: '11px',
+                                            fontWeight: 700,
+                                            background: hasUnsavedChanges ? '#16a34a' : undefined,
+                                            borderColor: hasUnsavedChanges ? '#15803d' : undefined,
+                                            color: hasUnsavedChanges ? '#ffffff' : '#94a3b8',
+                                            cursor: hasUnsavedChanges && !isSaving ? 'pointer' : 'not-allowed'
+                                        }}
+                                        title={hasUnsavedChanges ? `Save ${pendingEditsCount} unsaved cell edits to MongoDB database` : 'No unsaved edits'}
+                                    >
+                                        {isSaving ? (
+                                            <><RefreshCw size={11} className="animate-spin" /> Saving...</>
+                                        ) : (
+                                            <><Save size={11} /> Save Changes {hasUnsavedChanges && `(${pendingEditsCount})`}</>
+                                        )}
+                                    </button>
+                                    <button
+                                        className="modern-btn modern-btn-secondary"
+                                        onClick={handleOpenWeightModal}
+                                        title="Auto-fill via count weights (Add / Decrease)"
+                                    >
+                                        <Sparkles size={14} /> Auto-Fill Weights
+                                    </button>
+
+                                    {/* Select Columns Dropdown */}
+                                    <div style={{ position: 'relative' }}>
+                                        <button
+                                            className="modern-btn modern-btn-secondary"
+                                            onClick={() => setShowColumnFilter(v => !v)}
+                                            style={{ padding: '5px 8px', fontSize: '11px' }}
+                                        >
+                                            <SlidersHorizontal size={12} />
+                                            Columns ({visibleColumns.length})
+                                        </button>
+                                        {showColumnFilter && (
+                                            <div style={{
+                                                position: 'absolute',
+                                                top: 'calc(100% + 6px)',
+                                                right: 0,
+                                                background: '#fff',
+                                                border: '1px solid #e2e8f0',
+                                                borderRadius: '8px',
+                                                boxShadow: '0 8px 24px rgba(0,0,0,0.12)',
+                                                padding: '12px',
+                                                width: '300px',
+                                                zIndex: 60,
+                                                maxHeight: '360px',
+                                                display: 'flex',
+                                                flexDirection: 'column',
+                                                gap: '8px'
+                                            }}>
+                                                <div style={{ display: 'flex', gap: '6px' }}>
+                                                    <button
+                                                        className="modern-btn modern-btn-secondary"
+                                                        onClick={() => {
+                                                            const v: Record<string, boolean> = {};
+                                                            columns.forEach(c => { v[c] = true; });
+                                                            setVisibleCols(v);
+                                                        }}
+                                                        style={{ padding: '3px 8px', fontSize: '11px', flex: 1 }}
+                                                    >
+                                                        Show All
+                                                    </button>
+                                                    <button
+                                                        className="modern-btn modern-btn-outline"
+                                                        onClick={() => {
+                                                            const v: Record<string, boolean> = {};
+                                                            columns.forEach(c => { v[c] = false; });
+                                                            setVisibleCols(v);
+                                                        }}
+                                                        style={{ padding: '3px 8px', fontSize: '11px', flex: 1 }}
+                                                    >
+                                                        Hide All
+                                                    </button>
+                                                </div>
+
+                                                <input
+                                                    type="text"
+                                                    placeholder="Filter column names…"
+                                                    value={columnSearchQuery}
+                                                    onChange={e => setColumnSearchQuery(e.target.value)}
+                                                    style={{
+                                                        padding: '5px 8px',
+                                                        border: '1px solid #cbd5e1',
+                                                        borderRadius: '5px',
+                                                        fontSize: '11.5px',
+                                                        outline: 'none'
+                                                    }}
+                                                />
+
+                                                <div style={{ overflowY: 'auto', maxHeight: '240px' }}>
+                                                    {columns
+                                                        .filter(c => !columnSearchQuery || c.toLowerCase().includes(columnSearchQuery.toLowerCase()))
+                                                        .map(col => (
+                                                            <div key={col} style={{
+                                                                display: 'flex',
+                                                                alignItems: 'flex-start',
+                                                                gap: '8px',
+                                                                marginBottom: '5px'
+                                                            }}>
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={visibleCols[col] !== false}
+                                                                    onChange={() => setVisibleCols(p => ({
+                                                                        ...p,
+                                                                        [col]: !p[col]
+                                                                    }))}
+                                                                    style={{ marginTop: '2px', cursor: 'pointer' }}
+                                                                />
+                                                                <label style={{
+                                                                    fontSize: '11.5px',
+                                                                    cursor: 'pointer',
+                                                                    lineHeight: 1.3,
+                                                                    color: '#334155'
+                                                                }}>
+                                                                    {col}
+                                                                </label>
+                                                            </div>
+                                                        ))}
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Export QC Report Button */}
+                                    <button
+                                        className="modern-btn modern-btn-success"
+                                        onClick={handleExportQcReport}
+                                        style={{ padding: '5px 10px', fontSize: '11px' }}
+                                    >
+                                        <Download size={12} /> Export
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Scrollable Table Viewport - flex: 1 with minHeight: 0 and height: 0 prevents table from pushing pagination off-screen */}
+                            <div
+                                ref={tableScrollRef}
+                                style={{
+                                    flex: '1 1 0%',
+                                    minHeight: 0,
+                                    height: 0,
+                                    width: '100%',
+                                    overflowX: 'auto',
+                                    overflowY: 'auto',
+                                    background: '#ffffff',
+                                    WebkitOverflowScrolling: 'touch',
+                                    willChange: 'transform'
+                                }}
+                            >
+                                <table className="modern-table" style={{
+                                    width: 'max-content',
+                                    minWidth: '100%',
+                                    borderCollapse: 'collapse',
+                                    fontSize: '12px',
+                                    tableLayout: 'fixed'
+                                }}>
+                                    <thead>
+                                        <tr>
+                                            {/* Sticky Row Number Header */}
+                                            <th style={{
+                                                position: 'sticky',
+                                                top: 0,
+                                                left: 0,
+                                                zIndex: 25,
+                                                background: '#1e293b',
+                                                color: '#fff',
+                                                padding: '8px 10px',
+                                                width: '50px',
+                                                minWidth: '50px',
+                                                borderRight: '2px solid #475569'
+                                            }}>
+                                                #
+                                            </th>
+
+                                            {/* Sticky QC Status Header */}
+                                            <th style={{
                                                 position: 'sticky',
                                                 top: 0,
                                                 zIndex: 20,
                                                 background: '#1e293b',
                                                 color: '#fff',
                                                 padding: '8px 10px',
-                                                width: '210px',
-                                                minWidth: '210px',
-                                                textAlign: 'left',
-                                                fontWeight: 700,
-                                                fontSize: '11.5px',
-                                                borderRight: '1px solid #334155',
-                                                whiteSpace: 'nowrap',
-                                                overflow: 'hidden',
-                                                textOverflow: 'ellipsis'
-                                            }} title={col}>
-                                                {col}
+                                                width: '110px',
+                                                minWidth: '110px'
+                                            }}>
+                                                QC Status
                                             </th>
-                                        ))}
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {pageIndices.map((globalIdx) => {
-                                        const row = rows[globalIdx];
-                                        const qc = scanResults[globalIdx];
-                                        if (!row || !qc) return null;
 
-                                        const flashingCol = flashTarget && flashTarget.rowIdx === globalIdx
-                                            ? flashTarget.colName
-                                            : null;
+                                            {/* Dynamic Data Headers */}
+                                            {visibleColumns.map((col, idx) => (
+                                                <th key={idx} style={{
+                                                    position: 'sticky',
+                                                    top: 0,
+                                                    zIndex: 20,
+                                                    background: '#1e293b',
+                                                    color: '#fff',
+                                                    padding: '8px 10px',
+                                                    width: '210px',
+                                                    minWidth: '210px',
+                                                    textAlign: 'left',
+                                                    fontWeight: 700,
+                                                    fontSize: '11.5px',
+                                                    borderRight: '1px solid #334155',
+                                                    whiteSpace: 'nowrap',
+                                                    overflow: 'hidden',
+                                                    textOverflow: 'ellipsis'
+                                                }} title={col}>
+                                                    {col}
+                                                </th>
+                                            ))}
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {pageIndices.map((globalIdx) => {
+                                            const row = rows[globalIdx];
+                                            const qc = scanResults[globalIdx];
+                                            if (!row || !qc) return null;
 
-                                        return (
-                                            <QcTableRow
-                                                key={globalIdx}
-                                                globalIdx={globalIdx}
-                                                row={row}
-                                                qc={qc}
-                                                visibleColumns={visibleColumns}
-                                                columnMetaMap={columnMetaMap}
-                                                missingSet={pageMissingSets[globalIdx] || new Set()}
-                                                l2Set={pageL2Sets[globalIdx] || new Set()}
-                                                flashingCol={flashingCol}
-                                                isFlashTargetThisRow={flashTarget?.rowIdx === globalIdx}
-                                                flashTargetKind={flashTarget?.kind}
-                                                onUpdateCell={updateCellValue}
-                                                onJumpToFirstFailingL2={jumpToFirstFailingL2}
-                                                onJumpBackToBadge={jumpBackToBadge}
-                                                onJumpToFirstFollowUp={jumpToFirstFollowUp}
-                                                onJumpBackToL2={jumpBackToL2}
-                                                onJumpToGroup={jumpToGroup}
-                                            />
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
-                        </div>
+                                            const flashingCol = flashTarget && flashTarget.rowIdx === globalIdx
+                                                ? flashTarget.colName
+                                                : null;
 
-                        {/* Pagination Bar matching AdminDashboard.tsx style */}
-                        <div
-                            style={{
-                                display: 'flex',
-                                justifyContent: 'space-between',
-                                alignItems: 'center',
-                                padding: '10px 20px',
-                                background: 'var(--color-surface-2, #f8fafc)',
-                                borderTop: '1px solid var(--color-border, #e2e8f0)',
-                                borderBottomLeftRadius: '12px',
-                                borderBottomRightRadius: '12px',
-                                flexWrap: 'wrap',
-                                gap: '10px',
-                                flexShrink: 0
-                            }}
-                        >
-                            <div style={{ color: '#64748b', fontSize: '12.5px', display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                <span>
-                                    Showing {filteredIndices.length === 0
-                                        ? 0
-                                        : (currentPage - 1) * pageSize + 1} to{' '}
-                                    {Math.min(currentPage * pageSize, filteredIndices.length)} of{' '}
-                                    {filteredIndices.length} rows
-                                </span>
-
-                                <span style={{ color: '#cbd5e1' }}>|</span>
-
-                                <label style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '12.5px', color: '#475569' }}>
-                                    Rows per page:
-                                    <select
-                                        value={pageSize}
-                                        onChange={e => {
-                                            setPageSize(Number(e.target.value));
-                                            setCurrentPage(1);
-                                        }}
-                                        style={{
-                                            padding: '3px 8px',
-                                            borderRadius: '5px',
-                                            border: '1px solid #cbd5e1',
-                                            fontSize: '12px',
-                                            background: '#ffffff',
-                                            color: '#0f172a',
-                                            cursor: 'pointer'
-                                        }}
-                                    >
-                                        <option value={10}>10</option>
-                                        <option value={25}>25</option>
-                                        <option value={50}>50</option>
-                                        <option value={100}>100</option>
-                                    </select>
-                                </label>
+                                            return (
+                                                <QcTableRow
+                                                    key={globalIdx}
+                                                    globalIdx={globalIdx}
+                                                    row={row}
+                                                    qc={qc}
+                                                    visibleColumns={visibleColumns}
+                                                    columnMetaMap={columnMetaMap}
+                                                    missingSet={pageMissingSets[globalIdx] || new Set()}
+                                                    l2Set={pageL2Sets[globalIdx] || new Set()}
+                                                    flashingCol={flashingCol}
+                                                    isFlashTargetThisRow={flashTarget?.rowIdx === globalIdx}
+                                                    flashTargetKind={flashTarget?.kind}
+                                                    onUpdateCell={updateCellValue}
+                                                    onJumpToFirstFailingL2={jumpToFirstFailingL2}
+                                                    onJumpBackToBadge={jumpBackToBadge}
+                                                    onJumpToFirstFollowUp={jumpToFirstFollowUp}
+                                                    onJumpBackToL2={jumpBackToL2}
+                                                    onJumpToGroup={jumpToGroup}
+                                                />
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
                             </div>
 
-                            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                                <button
-                                    type="button"
-                                    className="qc-page-btn"
-                                    disabled={currentPage <= 1}
-                                    onClick={handleFirstPage}
-                                    style={{ padding: '6px 12px' }}
-                                    title="First page"
-                                >
-                                    «
-                                </button>
-                                <button
-                                    type="button"
-                                    className="qc-page-btn"
-                                    disabled={currentPage <= 1}
-                                    onClick={handlePrevPage}
-                                    title="Previous page"
-                                >
-                                    <ArrowLeft size={13} strokeWidth={2.5} /> Previous
-                                </button>
-                                <span style={{
-                                    display: 'inline-flex',
+                            {/* Pagination Bar matching AdminDashboard.tsx style */}
+                            <div
+                                style={{
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
                                     alignItems: 'center',
-                                    padding: '0 8px',
-                                    fontSize: '13px',
-                                    fontWeight: 700,
-                                    color: '#0f172a'
-                                }}>
-                                    Page {currentPage} of {totalPages}
-                                </span>
-                                <button
-                                    type="button"
-                                    className="qc-page-btn"
-                                    disabled={currentPage >= totalPages || filteredIndices.length === 0}
-                                    onClick={handleNextPage}
-                                    title="Next page"
-                                >
-                                    Next <ArrowRight size={13} strokeWidth={2.5} />
-                                </button>
-                                <button
-                                    type="button"
-                                    className="qc-page-btn"
-                                    disabled={currentPage >= totalPages || filteredIndices.length === 0}
-                                    onClick={handleLastPage}
-                                    style={{ padding: '6px 12px' }}
-                                    title="Last page"
-                                >
-                                    »
-                                </button>
+                                    padding: '10px 20px',
+                                    background: 'var(--color-surface-2, #f8fafc)',
+                                    borderTop: '1px solid var(--color-border, #e2e8f0)',
+                                    borderBottomLeftRadius: '12px',
+                                    borderBottomRightRadius: '12px',
+                                    flexWrap: 'wrap',
+                                    gap: '10px',
+                                    flexShrink: 0
+                                }}
+                            >
+                                <div style={{ color: '#64748b', fontSize: '12.5px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                    <span>
+                                        Showing {filteredIndices.length === 0
+                                            ? 0
+                                            : (currentPage - 1) * pageSize + 1} to{' '}
+                                        {Math.min(currentPage * pageSize, filteredIndices.length)} of{' '}
+                                        {filteredIndices.length} rows
+                                    </span>
+
+                                    <span style={{ color: '#cbd5e1' }}>|</span>
+
+                                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '12.5px', color: '#475569' }}>
+                                        Rows per page:
+                                        <select
+                                            value={pageSize}
+                                            onChange={e => {
+                                                setPageSize(Number(e.target.value));
+                                                setCurrentPage(1);
+                                            }}
+                                            style={{
+                                                padding: '3px 8px',
+                                                borderRadius: '5px',
+                                                border: '1px solid #cbd5e1',
+                                                fontSize: '12px',
+                                                background: '#ffffff',
+                                                color: '#0f172a',
+                                                cursor: 'pointer'
+                                            }}
+                                        >
+                                            <option value={10}>10</option>
+                                            <option value={25}>25</option>
+                                            <option value={50}>50</option>
+                                            <option value={100}>100</option>
+                                        </select>
+                                    </label>
+                                </div>
+
+                                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                                    <button
+                                        type="button"
+                                        className="qc-page-btn"
+                                        disabled={currentPage <= 1}
+                                        onClick={handleFirstPage}
+                                        style={{ padding: '6px 12px' }}
+                                        title="First page"
+                                    >
+                                        «
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="qc-page-btn"
+                                        disabled={currentPage <= 1}
+                                        onClick={handlePrevPage}
+                                        title="Previous page"
+                                    >
+                                        <ArrowLeft size={13} strokeWidth={2.5} /> Previous
+                                    </button>
+                                    <span style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        padding: '0 8px',
+                                        fontSize: '13px',
+                                        fontWeight: 700,
+                                        color: '#0f172a'
+                                    }}>
+                                        Page {currentPage} of {totalPages}
+                                    </span>
+                                    <button
+                                        type="button"
+                                        className="qc-page-btn"
+                                        disabled={currentPage >= totalPages || filteredIndices.length === 0}
+                                        onClick={handleNextPage}
+                                        title="Next page"
+                                    >
+                                        Next <ArrowRight size={13} strokeWidth={2.5} />
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="qc-page-btn"
+                                        disabled={currentPage >= totalPages || filteredIndices.length === 0}
+                                        onClick={handleLastPage}
+                                        style={{ padding: '6px 12px' }}
+                                        title="Last page"
+                                    >
+                                        »
+                                    </button>
+                                </div>
                             </div>
                         </div>
+                    </>
+                )}
+                {showWeightModal && (
+                    <WeightageModal
+                        onClose={() => setShowWeightModal(false)}
+                        onApply={(payload) => {
+                            try {
+                                applyWeights(payload);
+                            } catch (err: any) {
+                                console.error('Apply weightage failed:', err);
+                                setFillReport({
+                                    status: 'failed',
+                                    mode: payload.mode,
+                                    category: payload.category,
+                                    requested: 0,
+                                    done: 0,
+                                    reasons: [err?.message || String(err) || 'Unexpected error while applying weightage.']
+                                });
+                            }
+                        }}
+                        totalRows={rows.length}
+                        existingCounts={existingCounts}
+                    />
+                )}
+            </div>
+            {fillReport && (
+                <div
+                    className={`qc-toast qc-toast-${fillReport.status}${fillPaused ? ' qc-toast-paused' : ''}`}
+                    role="status"
+                    onMouseEnter={() => { fillPausedRef.current = true; setFillPaused(true); }}
+                    onMouseLeave={() => { fillPausedRef.current = false; setFillPaused(false); }}
+                >
+                    <div className="qc-toast-body">
+                        <div className="qc-toast-icon">
+                            {fillReport.status === 'success' ? <CheckCircle2 size={20} /> : <AlertTriangle size={20} />}
+                        </div>
+                        <div className="qc-toast-content">
+                            <div className="qc-toast-title">
+                                {fillReport.status === 'success' && 'Auto-fill completed'}
+                                {fillReport.status === 'partial' && 'Auto-fill completed with issues'}
+                                {fillReport.status === 'failed' && 'Auto-fill did not work'}
+                            </div>
+                            <div className="qc-toast-sub">
+                                {fillReport.category === 'service' ? 'Service' : 'Product'} · {fillReport.mode === 'add' ? 'Add' : 'Decrease'} · {fillReport.done} of {fillReport.requested} cells
+                            </div>
+                            {fillReport.reasons.length > 0 && (
+                                <ul className="qc-toast-reasons">
+                                    {fillReport.reasons.map((reason, i) => (
+                                        <li key={i}>{reason}</li>
+                                    ))}
+                                </ul>
+                            )}
+                        </div>
+                        <button
+                            type="button"
+                            className="qc-toast-close"
+                            onClick={() => setFillReport(null)}
+                            title="Dismiss notification"
+                            aria-label="Dismiss notification"
+                        >
+                            ×
+                        </button>
                     </div>
-                </>
+                    <div className="qc-toast-progress">
+                        <div
+                            className="qc-toast-progress-bar"
+                            style={{ width: `${Math.round(Math.max(0, Math.min(1, fillProgress)) * 100)}%` }}
+                        />
+                    </div>
+                </div>
             )}
-            {showWeightModal && (
-                <WeightageModal
-                    onClose={() => setShowWeightModal(false)}
-                    onApply={applyWeights}
-                    totalRows={rows.length}
-                    existingCounts={existingCounts}
-                />
-            )}
-        </div>
+        </>
     );
 };
 

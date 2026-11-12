@@ -236,6 +236,7 @@ function getSectionAFields(row: Record<string, any> = {}, index: number = 0, nps
             "Stiff gear shifting",
             "Engine vibration at high speed"
         ],
+
         [
             "Brake lever free play",
             "Mileage drop in traffic",
@@ -243,6 +244,7 @@ function getSectionAFields(row: Record<string, any> = {}, index: number = 0, nps
             "Speedometer fluctuation",
             "Hot exhaust guard"
         ],
+
         [
             "Hard handlebar grips",
             "Vibrating rearview mirrors",
@@ -650,12 +652,17 @@ const NpsAnalyzer: React.FC<NpsAnalyzerProps> = ({ onNavigateToDataSources }) =>
     const [brandModels, setBrandModels] = useState<string[]>([]);
     const [selectedFileId, setSelectedFileId] = useState<string>('');
 
+    const [customMasterData, setCustomMasterData] = useState<any>({
+        regions: [], countries: [], ibVersions: [], brandModels: []
+    });
+
     // Modal state for "Parse New PDF → Save as Common Upload"
     const [showPdfModal, setShowPdfModal] = useState<boolean>(false);
     const [modalFiles, setModalFiles] = useState<File[]>([]);
     const [modalRegion, setModalRegion] = useState<string>('Middle East');
     const [modalCountry, setModalCountry] = useState<string>('Guinea');
     const [modalIbVersion, setModalIbVersion] = useState<string>('v2.4');
+    const [modalBrandModel, setModalBrandModel] = useState<string>('');
     const [modalDossierMode, setModalDossierMode] = useState<'file' | 'dossier-4' | 'page'>('file');
     const [modalIsProcessing, setModalIsProcessing] = useState<boolean>(false);
     const [modalError, setModalError] = useState<string>('');
@@ -764,6 +771,8 @@ const NpsAnalyzer: React.FC<NpsAnalyzerProps> = ({ onNavigateToDataSources }) =>
                 setRegions(regs);
                 setIbVersions(vers);
                 setCommonFiles(files);
+                // ✅ NEW: keep the full blob so we can merge it into display* lists
+                setCustomMasterData(customData || { regions: [], countries: [], ibVersions: [], brandModels: [] });
                 if (customData && customData.brandModels) {
                     setBrandModels(customData.brandModels);
                 }
@@ -787,6 +796,45 @@ const NpsAnalyzer: React.FC<NpsAnalyzerProps> = ({ onNavigateToDataSources }) =>
 
         return () => { isMounted = false; };
     }, []);
+
+    // ── Merged dropdown options (static master data + custom values from Data Sources) ──
+    const displayRegions = useMemo(() => {
+        const list = [...regions];
+        (customMasterData.regions || []).forEach((rName: string) => {
+            if (!list.some(r => r.name.toLowerCase() === rName.toLowerCase())) {
+                list.push({ id: rName as any, name: rName });
+            }
+        });
+        return list;
+    }, [regions, customMasterData.regions]);
+
+    const displayCountries = useMemo(() => {
+        const list = [...countries];
+        (customMasterData.countries || []).forEach((cName: string, idx: number) => {
+            if (!list.some(c => c.name.toLowerCase() === cName.toLowerCase())) {
+                list.push({ id: 99000 + idx, name: cName, region_id: 0, region_name: '' });
+            }
+        });
+        return list;
+    }, [countries, customMasterData.countries]);
+
+    const displayIbVersions = useMemo(() => {
+        const list = [...ibVersions];
+        (customMasterData.ibVersions || []).forEach((vName: string, idx: number) => {
+            if (!list.some(v => v.name.toLowerCase() === vName.toLowerCase())) {
+                list.push({ id: 99000 + idx, name: vName });
+            }
+        });
+        return list;
+    }, [ibVersions, customMasterData.ibVersions]);
+
+    const displayBrandModels = useMemo(() => {
+        const set = new Set<string>();
+        brandModels.forEach(bm => set.add(bm));
+        (customMasterData.brandModels || []).forEach((bm: string) => set.add(bm));
+        if (set.size === 0) set.add('General');
+        return Array.from(set);
+    }, [brandModels, customMasterData.brandModels]);
 
     // Dependent Countries: Update when filterRegion changes
     useEffect(() => {
@@ -825,13 +873,25 @@ const NpsAnalyzer: React.FC<NpsAnalyzerProps> = ({ onNavigateToDataSources }) =>
         }
     }, [filteredCommonFiles]);
 
-    // Modal filtered countries
     const modalFilteredCountries = useMemo(() => {
-        if (!modalRegion) return countries;
-        const matchReg = regions.find(r => r.name.toLowerCase() === modalRegion.toLowerCase());
-        if (!matchReg) return countries;
-        return countries.filter(c => c.region_id === matchReg.id || c.region === matchReg.name);
-    }, [modalRegion, countries, regions]);
+        if (!modalRegion) return displayCountries;
+
+        const matchReg = displayRegions.find(
+            r => r.name.toLowerCase() === modalRegion.toLowerCase()
+        );
+        if (!matchReg) return displayCountries;
+
+        const isCustomRegion = typeof matchReg.id === 'string';
+
+        return displayCountries.filter(c => {
+            if (isCustomRegion) {
+                if (c.region_id === 0) return true;
+                if (c.region_name && c.region_name.toLowerCase() === matchReg.name.toLowerCase()) return true;
+                return false;
+            }
+            return c.region_id === matchReg.id;
+        });
+    }, [modalRegion, displayCountries, displayRegions]);
 
     // Modal extraction handler: runs SSE stream, then posts to /api/uploads
     const handleProcessPdfModal = async () => {
@@ -942,6 +1002,8 @@ const NpsAnalyzer: React.FC<NpsAnalyzerProps> = ({ onNavigateToDataSources }) =>
             uploadPayload.append('region_name', modalRegion);
             uploadPayload.append('country_name', modalCountry);
             uploadPayload.append('ib_version_name', modalIbVersion);
+            uploadPayload.append('brand_model_name', modalBrandModel || 'General');
+
             uploadPayload.append('total_records', String(extractedRows.length));
             uploadPayload.append('columns', JSON.stringify(extractedCols));
             uploadPayload.append('rows', JSON.stringify(extractedRows));
@@ -1841,80 +1903,80 @@ const NpsAnalyzer: React.FC<NpsAnalyzerProps> = ({ onNavigateToDataSources }) =>
                     </div>
 
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                        {saveSuccessMsg && (
-                            <span style={{
-                                fontSize: '11.5px',
-                                color: '#16a34a',
-                                background: '#f0fdf4',
-                                border: '1px solid #bbf7d0',
-                                padding: '3px 8px',
-                                borderRadius: '6px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '4px',
-                                fontWeight: 600
-                            }}>
-                                <CheckCircle2 size={12} /> {saveSuccessMsg}
-                            </span>
-                        )}
-
-                        <button
-                            type="button"
-                            className="modern-btn"
-                            onClick={handleSaveChanges}
-                            disabled={!hasUnsavedChanges || isSaving || !selectedFileId}
-                            style={{
-                                padding: '7px 15px',
-                                fontSize: '12.5px',
-                                fontWeight: 700,
-                                background: hasUnsavedChanges ? 'linear-gradient(135deg, #16a34a 0%, #059669 100%)' : '#f1f5f9',
-                                color: hasUnsavedChanges ? '#ffffff' : '#94a3b8',
-                                border: hasUnsavedChanges ? 'none' : '1px solid #e2e8f0',
-                                cursor: hasUnsavedChanges && !isSaving ? 'pointer' : 'not-allowed',
-                                boxShadow: hasUnsavedChanges ? '0 2px 8px rgba(22, 163, 74, 0.3)' : 'none',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '6px',
-                                transition: 'all 0.2s'
-                            }}
-                            title={hasUnsavedChanges ? `Save ${pendingEditsCount} unsaved cell edits to MongoDB database` : 'No unsaved edits'}
-                        >
-                            {isSaving ? (
-                                <>
-                                    <RefreshCw size={13} className="animate-spin" />
-                                    Saving...
-                                </>
-                            ) : (
-                                <>
-                                    <Save size={14} />
-                                    Save Changes {hasUnsavedChanges && `(${pendingEditsCount})`}
-                                </>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            {saveSuccessMsg && (
+                                <span style={{
+                                    fontSize: '11.5px',
+                                    color: '#16a34a',
+                                    background: '#f0fdf4',
+                                    border: '1px solid #bbf7d0',
+                                    padding: '3px 8px',
+                                    borderRadius: '6px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    fontWeight: 600
+                                }}>
+                                    <CheckCircle2 size={12} /> {saveSuccessMsg}
+                                </span>
                             )}
-                        </button>
 
-                        <button
-                            type="button"
-                            className="modern-btn modern-btn-primary"
-                            onClick={() => setShowPdfModal(true)}
-                            style={{ padding: '7px 14px', fontSize: '12px', background: 'linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)', border: 'none' }}
-                            title="Extract a new PDF / ZIP and add it directly to the common repository"
-                        >
-                            <Sparkles size={14} /> Parse New PDF → Save as Common Upload
-                        </button>
-                        {onNavigateToDataSources && (
                             <button
                                 type="button"
-                                className="modern-btn modern-btn-outline"
-                                onClick={onNavigateToDataSources}
-                                style={{ padding: '7px 12px', fontSize: '12px' }}
-                                title="Go to Data Sources tab to upload or manage common files"
+                                className="modern-btn"
+                                onClick={handleSaveChanges}
+                                disabled={!hasUnsavedChanges || isSaving || !selectedFileId}
+                                style={{
+                                    padding: '7px 15px',
+                                    fontSize: '12.5px',
+                                    fontWeight: 700,
+                                    background: hasUnsavedChanges ? 'linear-gradient(135deg, #16a34a 0%, #059669 100%)' : '#f1f5f9',
+                                    color: hasUnsavedChanges ? '#ffffff' : '#94a3b8',
+                                    border: hasUnsavedChanges ? 'none' : '1px solid #e2e8f0',
+                                    cursor: hasUnsavedChanges && !isSaving ? 'pointer' : 'not-allowed',
+                                    boxShadow: hasUnsavedChanges ? '0 2px 8px rgba(22, 163, 74, 0.3)' : 'none',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                    transition: 'all 0.2s'
+                                }}
+                                title={hasUnsavedChanges ? `Save ${pendingEditsCount} unsaved cell edits to MongoDB database` : 'No unsaved edits'}
                             >
-                                <Database size={13} /> Manage Data Sources
+                                {isSaving ? (
+                                    <>
+                                        <RefreshCw size={13} className="animate-spin" />
+                                        Saving...
+                                    </>
+                                ) : (
+                                    <>
+                                        <Save size={14} />
+                                        Save Changes {hasUnsavedChanges && `(${pendingEditsCount})`}
+                                    </>
+                                )}
                             </button>
-                        )}
+
+                            <button
+                                type="button"
+                                className="modern-btn modern-btn-primary"
+                                onClick={() => setShowPdfModal(true)}
+                                style={{ padding: '7px 14px', fontSize: '12px', background: 'linear-gradient(135deg, #2563eb 0%, #7c3aed 100%)', border: 'none' }}
+                                title="Extract a new PDF / ZIP and add it directly to the common repository"
+                            >
+                                <Sparkles size={14} /> Parse New PDF → Save as Common Upload
+                            </button>
+                            {onNavigateToDataSources && (
+                                <button
+                                    type="button"
+                                    className="modern-btn modern-btn-outline"
+                                    onClick={onNavigateToDataSources}
+                                    style={{ padding: '7px 12px', fontSize: '12px' }}
+                                    title="Go to Data Sources tab to upload or manage common files"
+                                >
+                                    <Database size={13} /> Manage Data Sources
+                                </button>
+                            )}
+                        </div>
                     </div>
-                </div>
 
                 </div>
                 {/* Dependent Dropdowns Filter Bar */}
@@ -2257,18 +2319,31 @@ const NpsAnalyzer: React.FC<NpsAnalyzerProps> = ({ onNavigateToDataSources }) =>
                             </div>
 
                             {/* Metadata Dropdowns */}
-                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
                                 <div>
                                     <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>
                                         Region
                                     </label>
                                     <select
                                         value={modalRegion}
-                                        onChange={e => setModalRegion(e.target.value)}
+                                        onChange={e => {
+                                            const nextRegion = e.target.value;
+                                            setModalRegion(nextRegion);
+                                            // Reset country to the first country of the new region
+                                            const nextMatch = displayRegions.find(r => r.name === nextRegion);
+                                            if (nextMatch) {
+                                                const sameRegion = displayCountries.filter(c =>
+                                                    typeof nextMatch.id === 'string'
+                                                        ? (c.region_id === 0 || c.region_name?.toLowerCase() === nextMatch.name.toLowerCase())
+                                                        : c.region_id === nextMatch.id
+                                                );
+                                                if (sameRegion.length > 0) setModalCountry(sameRegion[0].name);
+                                            }
+                                        }}
                                         disabled={modalIsProcessing}
                                         style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }}
                                     >
-                                        {regions.map(r => (
+                                        {displayRegions.map(r => (
                                             <option key={r.id} value={r.name}>{r.name}</option>
                                         ))}
                                     </select>
@@ -2284,6 +2359,9 @@ const NpsAnalyzer: React.FC<NpsAnalyzerProps> = ({ onNavigateToDataSources }) =>
                                         disabled={modalIsProcessing}
                                         style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }}
                                     >
+                                        {modalFilteredCountries.length === 0 && (
+                                            <option value="">-- No countries --</option>
+                                        )}
                                         {modalFilteredCountries.map(c => (
                                             <option key={c.id} value={c.name}>{c.name}</option>
                                         ))}
@@ -2300,8 +2378,25 @@ const NpsAnalyzer: React.FC<NpsAnalyzerProps> = ({ onNavigateToDataSources }) =>
                                         disabled={modalIsProcessing}
                                         style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }}
                                     >
-                                        {ibVersions.map(v => (
+                                        {displayIbVersions.map(v => (
                                             <option key={v.id} value={v.name}>{v.name}</option>
+                                        ))}
+                                    </select>
+                                </div>
+
+                                <div>
+                                    <label style={{ display: 'block', fontSize: '11.5px', fontWeight: 600, color: '#475569', marginBottom: '4px' }}>
+                                        Brand &amp; Model
+                                    </label>
+                                    <select
+                                        value={modalBrandModel}
+                                        onChange={e => setModalBrandModel(e.target.value)}
+                                        disabled={modalIsProcessing}
+                                        style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '12px' }}
+                                    >
+                                        <option value="">General</option>
+                                        {displayBrandModels.map(bm => (
+                                            <option key={bm} value={bm}>{bm}</option>
                                         ))}
                                     </select>
                                 </div>
